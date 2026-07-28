@@ -2,7 +2,7 @@
 """
 🔍 Phone Number Intelligence Bot
 Beautiful Buttons + Per User Expiry + 3 Free Searches
-Final Version
+Final Version - Fixed Result Display
 """
 
 import json
@@ -26,13 +26,13 @@ from telegram.ext import (
 from telegram.request import HTTPXRequest
 
 # ================== CONFIG ==================
-BOT_TOKEN       = "8642873626:AAHkybZD5LBO7331YisbProHnp1P8e6nhQQ"
-ADMIN_ID        = 5057489358
-DEFAULT_PIN     = "764523"
-API_URL         = "https://lk-api-pinsstm.ramaxinfo.workers.dev/"
-DATA_FILE       = Path("users.json")
-OWNER_CONTACT   = "@theplayerror"
-FREE_SEARCHES   = 3  # ← Free search limit
+BOT_TOKEN     = "8642873626:AAHkybZD5LBO7331YisbProHnp1P8e6nhQQ"
+ADMIN_ID      = 5057489358
+DEFAULT_PIN   = "764523"
+API_URL       = "https://lk-api-pinsstm.ramaxinfo.workers.dev/"
+DATA_FILE     = Path("users.json")
+OWNER_CONTACT = "@theplayerror"
+FREE_SEARCHES = 3
 
 # Conversation states
 WAITING_SINGLE = 1
@@ -59,71 +59,66 @@ def save_users(data):
 
 
 def get_or_create_user(user_id: int):
-    """User ko get karo ya naya banao"""
     users = load_users()
     uid   = str(user_id)
-
     if uid not in users:
         users[uid] = {
-            "expiry"       : "",
-            "added"        : date.today().isoformat(),
-            "is_premium"   : False,
-            "free_used"    : 0,
+            "expiry"        : "",
+            "added"         : date.today().isoformat(),
+            "is_premium"    : False,
+            "free_used"     : 0,
             "total_searches": 0
         }
         save_users(users)
-
     return users[uid]
 
 
 def get_free_remaining(user_id: int) -> int:
-    """Kitni free searches bachi hain"""
     user_data = get_or_create_user(user_id)
-    used = user_data.get("free_used", 0)
+    used      = user_data.get("free_used", 0)
     return max(0, FREE_SEARCHES - used)
 
 
 def use_one_search(user_id: int):
-    """Ek search count karo"""
     users     = load_users()
     uid       = str(user_id)
     user_data = users.get(uid, {})
+    user_data["free_used"]       = user_data.get("free_used", 0) + 1
+    user_data["total_searches"]  = user_data.get("total_searches", 0) + 1
+    users[uid] = user_data
+    save_users(users)
 
-    user_data["free_used"]      = user_data.get("free_used", 0) + 1
+
+def use_premium_search(user_id: int):
+    users     = load_users()
+    uid       = str(user_id)
+    user_data = users.get(uid, {})
     user_data["total_searches"] = user_data.get("total_searches", 0) + 1
     users[uid] = user_data
     save_users(users)
 
 
 def check_access(user_id: int):
-    """
-    Check karo user search kar sakta hai ya nahi
-    Returns: (can_search, status_text, days_left, is_premium)
-    """
-    users     = load_users()
-    uid       = str(user_id)
-    user_data = get_or_create_user(user_id)
-
+    get_or_create_user(user_id)
+    users      = load_users()
+    uid        = str(user_id)
+    user_data  = users[uid]
     is_premium = user_data.get("is_premium", False)
     expiry_str = user_data.get("expiry", "")
 
-    # Premium user check
     if is_premium and expiry_str:
         try:
             expiry = date.fromisoformat(expiry_str)
             if date.today() > expiry:
-                # Premium expired - check free remaining
                 free_left = get_free_remaining(user_id)
                 if free_left > 0:
-                    return True, f"❌ Premium expired | 🆓 {free_left} free searches left", 0, False
+                    return True, f"⚠️ Premium expired | 🆓 {free_left} free left", 0, False
                 return False, "❌ Premium expired & no free searches left", 0, False
-
             days = (expiry - date.today()).days
             return True, f"✅ Premium ({days} days left)", days, True
         except:
             pass
 
-    # Free user check
     free_left = get_free_remaining(user_id)
     if free_left > 0:
         return True, f"🆓 Free ({free_left}/{FREE_SEARCHES} searches left)", 0, False
@@ -132,15 +127,12 @@ def check_access(user_id: int):
 
 
 def upgrade_to_paid(user_id: int, days: int):
-    """User ko premium banao"""
     users     = load_users()
     uid       = str(user_id)
     user_data = get_or_create_user(user_id)
-
-    expiry = (date.today() + timedelta(days=days)).isoformat()
-
-    user_data["expiry"]     = expiry
-    user_data["is_premium"] = True
+    expiry    = (date.today() + timedelta(days=days)).isoformat()
+    user_data["expiry"]      = expiry
+    user_data["is_premium"]  = True
     users[uid] = user_data
     save_users(users)
 
@@ -154,11 +146,20 @@ SKIP_KEYS = {
     "created_at", "updated_at", "server",
     "watermark", "signature", "by", "made_by",
     "contact", "channel", "group", "join",
-    "advertisement", "ads", "promo",
+    "advertisement", "ads", "promo", "query",
+}
+
+SKIP_FIELDS_EXACT = {
+    "EncryptedPassword", "encrypted_password",
+    "Salt", "salt", "PinCode", "pin_code",
+    "CreditsInappPoints", "IP", "ip",
+    "TheDateOfTheEntrance",
 }
 
 
 def should_skip(key: str) -> bool:
+    if key in SKIP_FIELDS_EXACT:
+        return True
     key_lower = key.lower().strip()
     if key_lower in SKIP_KEYS:
         return True
@@ -167,7 +168,8 @@ def should_skip(key: str) -> bool:
         "owner", "credit", "powered", "source",
         "version", "watermark", "pheevar",
         "advertisement", "promo", "channel",
-        "server", "api_", "_at", "made_by",
+        "server", "api_", "made_by",
+        "encrypted", "password", "salt",
     ]
     for word in skip_words:
         if word in key_lower:
@@ -179,7 +181,7 @@ def should_skip_value(value) -> bool:
     if value is None or value == "":
         return True
     val_str = str(value).lower().strip()
-    if val_str in ("", "none", "null", "n/a", "na", "-", "0"):
+    if val_str in ("", "none", "null", "n/a", "na", "-", "0", "0.00", "0000-00-00"):
         return True
     skip_values = ["@pheevar", "pheevar", "@lk_", "t.me/", "telegram.me/"]
     for sv in skip_values:
@@ -188,27 +190,36 @@ def should_skip_value(value) -> bool:
     return False
 
 
-# ================== EMOJI + FORMAT ==================
+# ================== EMOJI ==================
 def get_emoji(key):
     key = key.lower()
     emojis = {
-        "name": "👤", "first_name": "👤", "last_name": "👤",
-        "full_name": "👤", "phone": "📞", "number": "📞",
-        "mobile": "📞", "email": "📧", "mail": "📧",
-        "address": "📍", "city": "🏙️", "state": "🗺️",
+        "name": "👤", "fullname": "👤", "full_name": "👤",
+        "first_name": "👤", "last_name": "👤", "surname": "👤",
+        "phone": "📞", "phone2": "📞", "number": "📞", "mobile": "📞",
+        "email": "📧", "mail": "📧",
+        "adres": "📍", "address": "📍", "adres2": "📍",
+        "city": "🏙️", "state": "🗺️", "region": "🗺️",
         "country": "🌍", "zip": "📮", "pincode": "📮",
+        "postalcode": "📮", "postal_code": "📮",
         "operator": "📡", "carrier": "📡", "circle": "📡",
         "upi": "💳", "bank": "🏦", "ifsc": "🏦",
-        "account": "🏦", "dob": "🎂", "birth": "🎂",
-        "age": "🎂", "gender": "🚻", "sim": "📱",
-        "imei": "📱", "device": "📱", "network": "📶",
-        "type": "🔖", "id": "🆔", "pan": "🪪",
-        "aadhar": "🪪", "voter": "🪪", "aadhaar": "🪪",
-        "father": "👨", "mother": "👩", "husband": "👨",
-        "wife": "👩", "district": "🗺️", "taluka": "🗺️",
-        "post": "📮", "village": "🏘️", "income": "💰",
-        "salary": "💰", "job": "💼", "company": "🏢",
-        "work": "💼",
+        "account": "🏦", "documentnumber": "🪪",
+        "document_number": "🪪", "dob": "🎂",
+        "dateofbirth": "🎂", "date_of_birth": "🎂",
+        "birth": "🎂", "age": "🎂", "gender": "🚻",
+        "sim": "📱", "imei": "📱", "device": "📱",
+        "network": "📶", "type": "🔖", "id": "🆔",
+        "pan": "🪪", "aadhar": "🪪", "voter": "🪪",
+        "aadhaar": "🪪", "father": "👨", "fathername": "👨",
+        "father_name": "👨", "mother": "👩",
+        "husband": "👨", "wife": "👩",
+        "district": "🗺️", "taluka": "🗺️",
+        "post": "📮", "village": "🏘️",
+        "income": "💰", "salary": "💰",
+        "job": "💼", "company": "🏢", "work": "💼",
+        "date": "📅", "registrationdate": "📅",
+        "registration_date": "📅",
     }
     for keyword, emoji in emojis.items():
         if keyword in key:
@@ -216,54 +227,114 @@ def get_emoji(key):
     return "📌"
 
 
+# ================== FORMAT ==================
+def format_record(record: dict) -> list:
+    lines = []
+    for k, v in record.items():
+        if should_skip(k):
+            continue
+        if should_skip_value(v):
+            continue
+        if isinstance(v, dict):
+            for sub_k, sub_v in v.items():
+                if should_skip(sub_k) or should_skip_value(sub_v):
+                    continue
+                emoji = get_emoji(sub_k.lower())
+                label = sub_k.replace("_", " ").replace("-", " ").title()
+                lines.append(f"{emoji} *{label}*: `{sub_v}`")
+            continue
+        if isinstance(v, list):
+            clean = [str(i) for i in v if not should_skip_value(i)]
+            if clean:
+                emoji = get_emoji(k.lower())
+                label = k.replace("_", " ").replace("-", " ").title()
+                lines.append(f"{emoji} *{label}*: `{', '.join(clean)}`")
+            continue
+        emoji = get_emoji(k.lower())
+        label = k.replace("_", " ").replace("-", " ").title()
+        lines.append(f"{emoji} *{label}*: `{v}`")
+    return lines
+
+
 def format_result(number, data):
+    if not data:
+        return f"📱 *{number}*\n_No data found_"
+
     if isinstance(data, list):
         if not data:
             return f"📱 *{number}*\n_No data found_"
         if isinstance(data[0], dict):
-            data = data[0]
+            data = {"data": {"source": {"records": data}}}
         else:
             return f"📱 *{number}*\n`{str(data[0])}`"
 
-    if isinstance(data, dict):
-        lines = [f"📱 *Result for* `{number}`\n{'━' * 25}"]
-        found = 0
+    if not isinstance(data, dict):
+        return f"📱 *{number}*\n`{str(data)}`"
 
-        for k, v in data.items():
-            if should_skip(k):
-                continue
-            if should_skip_value(v):
-                continue
+    main_data   = data.get("data", data)
+    all_records = []
 
-            if isinstance(v, dict):
-                for sub_k, sub_v in v.items():
-                    if should_skip(sub_k) or should_skip_value(sub_v):
-                        continue
-                    emoji = get_emoji(sub_k)
-                    label = sub_k.replace("_", " ").replace("-", " ").title()
-                    lines.append(f"{emoji} *{label}*: `{sub_v}`")
-                    found += 1
-                continue
+    if isinstance(main_data, dict):
+        has_sources = False
 
-            if isinstance(v, list):
-                clean = [str(i) for i in v if not should_skip_value(i)]
-                if clean:
-                    emoji = get_emoji(k)
-                    label = k.replace("_", " ").replace("-", " ").title()
-                    lines.append(f"{emoji} *{label}*: `{', '.join(clean)}`")
-                    found += 1
-                continue
+        # source1, source2 ... structure
+        for key, value in main_data.items():
+            if isinstance(value, dict) and "records" in value:
+                has_sources = True
+                records = value["records"]
+                if isinstance(records, list):
+                    for rec in records:
+                        if isinstance(rec, dict):
+                            all_records.append(rec)
 
-            emoji = get_emoji(k)
-            label = k.replace("_", " ").replace("-", " ").title()
-            lines.append(f"{emoji} *{label}*: `{v}`")
-            found += 1
+        # direct records key
+        if not has_sources and "records" in main_data:
+            records = main_data["records"]
+            if isinstance(records, list):
+                for rec in records:
+                    if isinstance(rec, dict):
+                        all_records.append(rec)
 
-        if found == 0:
-            return f"📱 *{number}*\n_No relevant data found_"
-        return "\n".join(lines)
+        # flat dict
+        if not all_records and not has_sources:
+            all_records.append(main_data)
 
-    return f"📱 *{number}*\n_No data found_"
+    elif isinstance(main_data, list):
+        for rec in main_data:
+            if isinstance(rec, dict):
+                all_records.append(rec)
+
+    if not all_records:
+        return f"📱 *{number}*\n_No data found_"
+
+    # Remove duplicates
+    seen            = set()
+    unique_records  = []
+    for rec in all_records:
+        identifier = (
+            str(rec.get("FullName", rec.get("Name", ""))).lower() +
+            str(rec.get("Phone", rec.get("Phone2", "")))
+        )
+        if identifier not in seen:
+            seen.add(identifier)
+            unique_records.append(rec)
+
+    output = [
+        f"📱 *Result for* `{number}`",
+        f"📊 *{len(unique_records)} record(s) found*",
+        f"{'━' * 28}",
+    ]
+
+    for idx, record in enumerate(unique_records, 1):
+        if len(unique_records) > 1:
+            output.append(f"\n*━━ Record #{idx} ━━*")
+        lines = format_record(record)
+        if lines:
+            output.extend(lines)
+        else:
+            output.append("_No relevant data_")
+
+    return "\n".join(output)
 
 
 def search_api(term: str):
@@ -288,11 +359,11 @@ def main_menu_keyboard(user_id: int):
         search_label = "🔍 Single Search"
         batch_label  = "📦 Batch Search"
     elif free_left > 0:
-        search_label = f"🔍 Search ({free_left} free left)"
-        batch_label  = f"📦 Batch ({free_left} free left)"
+        search_label = f"🔍 Search ({free_left} free)"
+        batch_label  = f"📦 Batch ({free_left} free)"
     else:
-        search_label = "🔍 Search (🔒 Locked)"
-        batch_label  = "📦 Batch (🔒 Locked)"
+        search_label = "🔍 Search (🔒)"
+        batch_label  = "📦 Batch (🔒)"
 
     return InlineKeyboardMarkup([
         [
@@ -327,7 +398,11 @@ def admin_menu_keyboard():
     ])
 
 
-def back_keyboard():
+def back_keyboard(user_id: int = None):
+    if user_id:
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔙 Main Menu", callback_data="main_menu")]
+        ])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🔙 Main Menu", callback_data="main_menu")]
     ])
@@ -386,9 +461,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         status_emoji = "🔴"
         status_color = "Locked"
 
-    # Free searches bar
     used = FREE_SEARCHES - free_left
-    bar  = "🟢" * (FREE_SEARCHES - used) + "🔴" * used
+    bar  = "🟢" * free_left + "🔴" * used
 
     text = (
         f"{'━' * 30}\n"
@@ -411,8 +485,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if update.callback_query:
         await safe_edit(
-            update.callback_query,
-            text,
+            update.callback_query, text,
             reply_markup=main_menu_keyboard(user.id)
         )
     else:
@@ -429,29 +502,29 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    user = query.from_user
+    user             = query.from_user
     ok, status, days, is_premium = check_access(user.id)
-    free_left = get_free_remaining(user.id)
-    user_data = get_or_create_user(user.id)
-    total_s   = user_data.get("total_searches", 0)
+    free_left        = get_free_remaining(user.id)
+    user_data        = get_or_create_user(user.id)
+    total_s          = user_data.get("total_searches", 0)
 
     if is_premium:
-        acc_type = "💎 Premium"
+        acc_type   = "💎 Premium"
         bar_length = 20
-        filled = min(int((days / 365) * bar_length), bar_length) if days > 0 else 0
-        bar = "█" * filled + "░" * (bar_length - filled)
+        filled     = min(int((days / 365) * bar_length), bar_length) if days > 0 else 0
+        bar        = "█" * filled + "░" * (bar_length - filled)
         expiry_info = (
             f"📅 *Expires:* {user_data.get('expiry', 'N/A')}\n"
             f"⏳ *Days Left:* {days}\n"
             f"📈 `[{bar}]`\n"
         )
     else:
-        acc_type = f"🆓 Free ({free_left} searches left)"
-        used = FREE_SEARCHES - free_left
-        bar  = "🟢" * free_left + "🔴" * used
+        acc_type    = f"🆓 Free ({free_left} left)"
+        used        = FREE_SEARCHES - free_left
+        bar         = "🟢" * free_left + "🔴" * used
         expiry_info = (
             f"🆓 *Free Searches:* {free_left}/{FREE_SEARCHES}\n"
-            f"📊 `[{bar}]`\n"
+            f"📊 {bar}\n"
         )
 
     text = (
@@ -468,7 +541,7 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"{expiry_info}\n"
         f"🔍 *Total Searches:* {total_s}\n"
     )
-    await safe_edit(query, text, reply_markup=back_keyboard())
+    await safe_edit(query, text, reply_markup=back_keyboard(user.id))
 
 
 # ================== STATUS ==================
@@ -476,9 +549,9 @@ async def status_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    user = query.from_user
+    user             = query.from_user
     ok, status, days, is_premium = check_access(user.id)
-    free_left = get_free_remaining(user.id)
+    free_left        = get_free_remaining(user.id)
 
     if is_premium:
         text = (
@@ -492,20 +565,19 @@ async def status_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🆓 *Account: FREE*\n\n"
             f"🔍 {free_left} searches remaining\n"
             f"📅 {status}\n\n"
-            f"💡 *Upgrade to Premium for unlimited searches:*\n"
+            f"💡 Buy Premium for unlimited:\n"
             f"👉 {OWNER_CONTACT}"
         )
     else:
         text = (
             f"🔴 *Account: LOCKED*\n\n"
             f"📅 {status}\n\n"
-            f"❌ All {FREE_SEARCHES} free searches used up!\n\n"
-            f"💰 *Buy subscription to continue:*\n"
+            f"❌ All {FREE_SEARCHES} free searches used!\n\n"
+            f"💰 Buy subscription:\n"
             f"👉 {OWNER_CONTACT}\n\n"
             f"Your ID: `{user.id}`"
         )
-
-    await safe_edit(query, text, reply_markup=back_keyboard())
+    await safe_edit(query, text, reply_markup=back_keyboard(user.id))
 
 
 # ================== HELP ==================
@@ -518,7 +590,7 @@ async def help_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"       ❓ *Help Guide*\n"
         f"{'━' * 30}\n\n"
         f"🆓 *Free Users*\n"
-        f"   Get {FREE_SEARCHES} free searches!\n"
+        f"   {FREE_SEARCHES} free searches total\n"
         f"   After that, buy subscription.\n\n"
         f"💎 *Premium Users*\n"
         f"   Unlimited searches!\n\n"
@@ -528,7 +600,7 @@ async def help_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📦 *Batch Search*\n"
         f"   Comma separated numbers\n"
         f"   Example: `9198...,9197...`\n"
-        f"   ⚠️ Each number = 1 search count\n\n"
+        f"   ⚠️ Each number = 1 search\n\n"
         f"{'━' * 30}\n"
         f"💡 *Tips:*\n"
         f"   • Use country code (91 for India)\n"
@@ -540,9 +612,8 @@ async def help_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ================== BUY ==================
 async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
+    query     = update.callback_query
     await query.answer()
-
     user      = query.from_user
     free_left = get_free_remaining(user.id)
 
@@ -550,16 +621,16 @@ async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"{'━' * 30}\n"
         f"       💰 *Buy Access*\n"
         f"{'━' * 30}\n\n"
-        f"🆓 Free searches used: {FREE_SEARCHES - free_left}/{FREE_SEARCHES}\n\n"
+        f"🆓 Free used: {FREE_SEARCHES - free_left}/{FREE_SEARCHES}\n\n"
         f"📋 *Premium Plans:*\n\n"
-        f"🥉 *7 Days*   → ₹50   (Unlimited)\n"
-        f"🥈 *30 Days*  → ₹150  (Unlimited)\n"
-        f"🥇 *90 Days*  → ₹300  (Unlimited)\n"
-        f"💎 *365 Days* → ₹999 (Unlimited)\n\n"
+        f"🥉 *7 Days*   → ₹50\n"
+        f"🥈 *30 Days*  → ₹150\n"
+        f"🥇 *90 Days*  → ₹300\n"
+        f"💎 *365 Days* → ₹999\n\n"
         f"{'━' * 30}\n\n"
         f"📱 Contact admin:\n"
         f"👉 {OWNER_CONTACT}\n\n"
-        f"Your ID: `{query.from_user.id}`\n"
+        f"Your ID: `{user.id}`\n"
         f"_Share this ID with admin_"
     )
     await safe_edit(query, text, reply_markup=buy_keyboard())
@@ -570,32 +641,29 @@ async def single_search_start(update: Update, context: ContextTypes.DEFAULT_TYPE
     query = update.callback_query
     await query.answer()
 
-    user = query.from_user
-    ok, status, _, is_premium = check_access(user.id)
-    free_left = get_free_remaining(user.id)
+    user                         = query.from_user
+    ok, status, _, is_premium    = check_access(user.id)
+    free_left                    = get_free_remaining(user.id)
 
     if not ok:
         await safe_edit(
             query,
             f"🔒 *Search Locked!*\n\n"
             f"{status}\n\n"
-            f"💰 *Buy subscription for unlimited searches:*\n"
+            f"💰 Buy subscription:\n"
             f"👉 {OWNER_CONTACT}\n\n"
             f"Your ID: `{user.id}`",
             reply_markup=buy_keyboard(),
         )
         return ConversationHandler.END
 
-    if is_premium:
-        info = "💎 Premium — Unlimited searches"
-    else:
-        info = f"🆓 {free_left} free search(es) remaining"
+    info = "💎 Premium — Unlimited" if is_premium else f"🆓 {free_left} search(es) remaining"
 
     await safe_edit(
         query,
         f"🔍 *Single Search Mode*\n\n"
         f"📊 {info}\n\n"
-        f"📱 Enter the phone number:\n"
+        f"📱 Enter phone number:\n"
         f"_Example: 919876543210_\n\n"
         f"Type /cancel to go back",
     )
@@ -608,16 +676,14 @@ async def single_search_process(update: Update, context: ContextTypes.DEFAULT_TY
 
     if not number.isdigit():
         await update.message.reply_text(
-            "❌ Invalid! Only digits allowed.\nTry again or /cancel"
+            "❌ Invalid! Only digits.\nTry again or /cancel"
         )
         return WAITING_SINGLE
 
-    # Re-check access before searching
     ok, status, _, is_premium = check_access(user.id)
     if not ok:
         await update.message.reply_text(
-            f"🔒 *Search Locked!*\n\n{status}\n\n"
-            f"💰 Buy: {OWNER_CONTACT}",
+            f"🔒 *Locked!*\n{status}\n💰 {OWNER_CONTACT}",
             reply_markup=buy_keyboard(),
             parse_mode="Markdown"
         )
@@ -627,15 +693,16 @@ async def single_search_process(update: Update, context: ContextTypes.DEFAULT_TY
     result = search_api(number)
 
     if result["ok"]:
-        # Count this search (only for free users)
-        if not is_premium:
+        if is_premium:
+            use_premium_search(user.id)
+        else:
             use_one_search(user.id)
 
         free_left = get_free_remaining(user.id)
-        text = format_result(number, result["data"])
+        text      = format_result(number, result["data"])
 
         if not is_premium:
-            text += f"\n\n{'━' * 25}\n🆓 Searches remaining: *{free_left}/{FREE_SEARCHES}*"
+            text += f"\n\n{'━' * 25}\n🆓 Remaining: *{free_left}/{FREE_SEARCHES}*"
 
         await msg.edit_text(
             text,
@@ -645,7 +712,7 @@ async def single_search_process(update: Update, context: ContextTypes.DEFAULT_TY
     else:
         await msg.edit_text(
             f"❌ *Search Failed*\n\nError: `{result['error']}`",
-            reply_markup=back_keyboard(),
+            reply_markup=back_keyboard(user.id),
             parse_mode="Markdown",
         )
     return ConversationHandler.END
@@ -656,24 +723,20 @@ async def batch_search_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await query.answer()
 
-    user = query.from_user
+    user                      = query.from_user
     ok, status, _, is_premium = check_access(user.id)
-    free_left = get_free_remaining(user.id)
+    free_left                 = get_free_remaining(user.id)
 
     if not ok:
         await safe_edit(
             query,
-            f"🔒 *Search Locked!*\n\n"
-            f"{status}\n\n"
-            f"💰 Buy: {OWNER_CONTACT}",
+            f"🔒 *Search Locked!*\n\n{status}\n\n"
+            f"💰 {OWNER_CONTACT}",
             reply_markup=buy_keyboard(),
         )
         return ConversationHandler.END
 
-    if is_premium:
-        info = "💎 Premium — Unlimited"
-    else:
-        info = f"🆓 {free_left} search(es) left (each number = 1 search)"
+    info = "💎 Unlimited" if is_premium else f"🆓 {free_left} search(es) left"
 
     await safe_edit(
         query,
@@ -693,24 +756,20 @@ async def batch_search_process(update: Update, context: ContextTypes.DEFAULT_TYP
     numbers = [n.strip() for n in raw.replace(",", " ").split() if n.strip()]
 
     if not numbers:
-        await update.message.reply_text(
-            "❌ No numbers found! Try again or /cancel"
-        )
+        await update.message.reply_text("❌ No numbers! Try again or /cancel")
         return WAITING_BATCH
 
-    numbers = numbers[:15]
-    total   = len(numbers)
-
-    # Check how many searches available
+    numbers   = numbers[:15]
+    total     = len(numbers)
     ok, status, _, is_premium = check_access(user.id)
     free_left = get_free_remaining(user.id)
 
     if not is_premium and total > free_left:
         await update.message.reply_text(
-            f"❌ *Not enough free searches!*\n\n"
-            f"You entered: {total} numbers\n"
-            f"Available: {free_left} searches\n\n"
-            f"💡 Enter max {free_left} numbers\n"
+            f"❌ *Not enough searches!*\n\n"
+            f"You entered: *{total}* numbers\n"
+            f"Available: *{free_left}* searches\n\n"
+            f"💡 Enter max *{free_left}* numbers\n"
             f"Or buy premium for unlimited.\n"
             f"👉 {OWNER_CONTACT}",
             reply_markup=buy_keyboard(),
@@ -727,7 +786,9 @@ async def batch_search_process(update: Update, context: ContextTypes.DEFAULT_TYP
         progress = "█" * i + "░" * (total - i)
 
         if result["ok"]:
-            if not is_premium:
+            if is_premium:
+                use_premium_search(user.id)
+            else:
                 use_one_search(user.id)
             text = format_result(num, result["data"])
             await update.message.reply_text(text, parse_mode="Markdown")
@@ -738,16 +799,14 @@ async def batch_search_process(update: Update, context: ContextTypes.DEFAULT_TYP
             )
 
         try:
-            await msg.edit_text(
-                f"🚀 Processing... ({i}/{total})\n[{progress}]"
-            )
+            await msg.edit_text(f"🚀 Processing... ({i}/{total})\n[{progress}]")
         except:
             pass
 
     free_left = get_free_remaining(user.id)
     summary   = f"✅ *Batch Complete!*\n📊 Processed: {total} numbers"
     if not is_premium:
-        summary += f"\n🆓 Searches remaining: *{free_left}/{FREE_SEARCHES}*"
+        summary += f"\n🆓 Remaining: *{free_left}/{FREE_SEARCHES}*"
 
     await msg.edit_text(
         summary,
@@ -767,17 +826,17 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
-# ================== ADMIN PANEL ==================
+# ================== ADMIN ==================
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         if update.message:
             await update.message.reply_text("❌ Admin only!")
         return ConversationHandler.END
 
-    users    = load_users()
-    total    = len(users)
-    premium  = sum(1 for u in users.values() if u.get("is_premium", False))
-    free_u   = total - premium
+    users   = load_users()
+    total   = len(users)
+    premium = sum(1 for u in users.values() if u.get("is_premium", False))
+    free_u  = total - premium
 
     text = (
         f"{'━' * 30}\n"
@@ -788,15 +847,9 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     if update.callback_query:
-        await safe_edit(
-            update.callback_query, text,
-            reply_markup=admin_menu_keyboard()
-        )
+        await safe_edit(update.callback_query, text, reply_markup=admin_menu_keyboard())
     else:
-        await update.message.reply_text(
-            text, reply_markup=admin_menu_keyboard(),
-            parse_mode="Markdown"
-        )
+        await update.message.reply_text(text, reply_markup=admin_menu_keyboard(), parse_mode="Markdown")
     return ConversationHandler.END
 
 
@@ -806,10 +859,7 @@ async def admin_add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer("❌")
         return ConversationHandler.END
     await query.answer()
-    await safe_edit(
-        query,
-        "➕ *Add Premium User*\n\nEnter Telegram User ID:\n\n/cancel to go back",
-    )
+    await safe_edit(query, "➕ *Add Premium User*\n\nEnter Telegram User ID:\n\n/cancel to go back")
     return ADMIN_ADD_ID
 
 
@@ -833,18 +883,14 @@ async def admin_add_expiry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.data == "admin_cancel":
         await admin_panel(update, context)
         return ConversationHandler.END
-
     days_map = {"exp_7": 7, "exp_30": 30, "exp_90": 90, "exp_365": 365}
     days     = days_map.get(query.data, 30)
     uid      = context.user_data.get("new_uid")
     upgrade_to_paid(int(uid), days)
     expiry   = (date.today() + timedelta(days=days)).isoformat()
-
     await safe_edit(
         query,
-        f"✅ *Premium User Added!*\n\n"
-        f"🆔 ID: `{uid}`\n📅 Expiry: `{expiry}`\n"
-        f"⏳ Duration: {days} days\n📦 Type: 💎 Premium",
+        f"✅ *Premium Added!*\n\n🆔 ID: `{uid}`\n📅 Expiry: `{expiry}`\n⏳ {days} days",
         reply_markup=admin_menu_keyboard(),
     )
     return ConversationHandler.END
@@ -856,10 +902,7 @@ async def admin_remove_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.answer("❌")
         return ConversationHandler.END
     await query.answer()
-    await safe_edit(
-        query,
-        "❌ *Remove User*\n\nEnter Telegram User ID:\n\n/cancel to go back",
-    )
+    await safe_edit(query, "❌ *Remove User*\n\nEnter Telegram User ID:\n\n/cancel to go back")
     return ADMIN_REM_ID
 
 
@@ -869,17 +912,9 @@ async def admin_remove_process(update: Update, context: ContextTypes.DEFAULT_TYP
     if uid in users:
         del users[uid]
         save_users(users)
-        await update.message.reply_text(
-            f"✅ User `{uid}` removed!",
-            reply_markup=admin_menu_keyboard(),
-            parse_mode="Markdown",
-        )
+        await update.message.reply_text(f"✅ User `{uid}` removed!", reply_markup=admin_menu_keyboard(), parse_mode="Markdown")
     else:
-        await update.message.reply_text(
-            f"❌ User `{uid}` not found!",
-            reply_markup=admin_menu_keyboard(),
-            parse_mode="Markdown",
-        )
+        await update.message.reply_text(f"❌ User `{uid}` not found!", reply_markup=admin_menu_keyboard(), parse_mode="Markdown")
     return ConversationHandler.END
 
 
@@ -889,10 +924,7 @@ async def admin_expiry_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.answer("❌")
         return ConversationHandler.END
     await query.answer()
-    await safe_edit(
-        query,
-        "📅 *Set Expiry / Upgrade*\n\nEnter User ID:\n\n/cancel to go back",
-    )
+    await safe_edit(query, "📅 *Set Expiry*\n\nEnter User ID:\n\n/cancel to go back")
     return ADMIN_EXP_ID
 
 
@@ -900,7 +932,7 @@ async def admin_expiry_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.message.text.strip()
     context.user_data["exp_uid"] = uid
     await update.message.reply_text(
-        f"User: `{uid}`\nSelect new duration:",
+        f"User: `{uid}`\nSelect duration:",
         reply_markup=duration_keyboard("setexp"),
         parse_mode="Markdown",
     )
@@ -913,18 +945,14 @@ async def admin_expiry_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.data == "admin_cancel":
         await admin_panel(update, context)
         return ConversationHandler.END
-
     days_map = {"setexp_7": 7, "setexp_30": 30, "setexp_90": 90, "setexp_365": 365}
     days     = days_map.get(query.data, 30)
     uid      = context.user_data.get("exp_uid")
     upgrade_to_paid(int(uid), days)
     expiry   = (date.today() + timedelta(days=days)).isoformat()
-
     await safe_edit(
         query,
-        f"✅ *Upgraded to Premium!*\n\n"
-        f"🆔 User: `{uid}`\n📅 Expiry: `{expiry}`\n"
-        f"⏳ Duration: {days} days",
+        f"✅ *Upgraded to Premium!*\n\n🆔 User: `{uid}`\n📅 Expiry: `{expiry}`\n⏳ {days} days",
         reply_markup=admin_menu_keyboard(),
     )
     return ConversationHandler.END
@@ -937,19 +965,17 @@ async def admin_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await query.answer()
     users = load_users()
-
     if not users:
         await safe_edit(query, "📋 *No users yet!*", reply_markup=admin_menu_keyboard())
         return
 
     text = f"{'━' * 30}\n📋 *All Users ({len(users)})*\n{'━' * 30}\n\n"
-
     for uid, info in users.items():
-        is_prem   = info.get("is_premium", False)
-        acc_type  = "💎" if is_prem else "🆓"
-        free_used = info.get("free_used", 0)
-        total_s   = info.get("total_searches", 0)
-        exp       = info.get("expiry", "N/A")
+        is_prem  = info.get("is_premium", False)
+        acc_type = "💎" if is_prem else "🆓"
+        free_u   = info.get("free_used", 0)
+        total_s  = info.get("total_searches", 0)
+        exp      = info.get("expiry", "")
 
         if is_prem and exp:
             try:
@@ -962,10 +988,10 @@ async def admin_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except:
                 s = "⚪ N/A"
         else:
-            left = max(0, FREE_SEARCHES - free_used)
-            s = f"🔍 {left}/{FREE_SEARCHES} free"
+            left = max(0, FREE_SEARCHES - free_u)
+            s    = f"🔍 {left}/{FREE_SEARCHES} free"
 
-        text += f"{acc_type} `{uid}` | {s} | Total: {total_s}\n"
+        text += f"{acc_type} `{uid}` | {s} | 🔍{total_s}\n"
 
     await safe_edit(query, text[:4000], reply_markup=admin_menu_keyboard())
 
@@ -978,17 +1004,16 @@ async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     users = load_users()
 
-    total       = len(users)
-    premium_act = 0
-    premium_exp = 0
-    free_active = 0
-    free_done   = 0
+    total          = len(users)
+    premium_act    = 0
+    premium_exp    = 0
+    free_active    = 0
+    free_done      = 0
     total_searches = 0
 
     for info in users.values():
         is_prem = info.get("is_premium", False)
         total_searches += info.get("total_searches", 0)
-
         if is_prem:
             try:
                 exp = date.fromisoformat(info.get("expiry", "2000-01-01"))
@@ -999,8 +1024,7 @@ async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except:
                 premium_exp += 1
         else:
-            free_used = info.get("free_used", 0)
-            if free_used < FREE_SEARCHES:
+            if info.get("free_used", 0) < FREE_SEARCHES:
                 free_active += 1
             else:
                 free_done += 1
@@ -1009,16 +1033,16 @@ async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"{'━' * 30}\n"
         f"       📊 *Bot Statistics*\n"
         f"{'━' * 30}\n\n"
-        f"👥 *Total Users*     : {total}\n"
-        f"🔍 *Total Searches*  : {total_searches}\n\n"
-        f"{'━' * 30}\n"
-        f"       💎 *Premium*\n"
-        f"{'━' * 30}\n"
+        f"👥 *Total Users*    : {total}\n"
+        f"🔍 *Total Searches* : {total_searches}\n\n"
+        f"{'━' * 25}\n"
+        f"💎 *Premium*\n"
+        f"{'━' * 25}\n"
         f"🟢 Active  : {premium_act}\n"
         f"🔴 Expired : {premium_exp}\n\n"
-        f"{'━' * 30}\n"
-        f"       🆓 *Free Users*\n"
-        f"{'━' * 30}\n"
+        f"{'━' * 25}\n"
+        f"🆓 *Free Users*\n"
+        f"{'━' * 25}\n"
         f"🟢 Has searches : {free_active}\n"
         f"🔴 All used     : {free_done}\n\n"
         f"📅 Date: {date.today()}\n"
