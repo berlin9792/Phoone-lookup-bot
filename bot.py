@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-🔍 Phone Number Intelligence Bot - 1 Free Search
+🔍 Phone Number Intelligence Bot
+Trial: 1 search | Plans: 5/10/15/unlimited per day
 """
 
 import json
 import requests
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
 from pathlib import Path
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -23,15 +24,61 @@ DATA_FILE     = Path("users.json")
 OWNER_CONTACT = "@theplayerror"
 FREE_SEARCHES = 1
 
+# ================== PLANS ==================
+PLANS = {
+    "trial": {
+        "name"       : "🆓 Trial",
+        "days"       : 0,
+        "price"      : 0,
+        "daily_limit": 0,
+        "unlimited"  : False,
+        "is_free"    : True,
+    },
+    "7days": {
+        "name"       : "🥉 7 Days",
+        "days"       : 7,
+        "price"      : 50,
+        "daily_limit": 5,
+        "unlimited"  : False,
+        "is_free"    : False,
+    },
+    "30days": {
+        "name"       : "🥈 30 Days",
+        "days"       : 30,
+        "price"      : 130,
+        "daily_limit": 10,
+        "unlimited"  : False,
+        "is_free"    : False,
+    },
+    "6months": {
+        "name"       : "🥇 6 Months",
+        "days"       : 180,
+        "price"      : 300,
+        "daily_limit": 15,
+        "unlimited"  : False,
+        "is_free"    : False,
+    },
+    "12months": {
+        "name"       : "💎 12 Months",
+        "days"       : 365,
+        "price"      : 799,
+        "daily_limit": 999999,
+        "unlimited"  : True,
+        "is_free"    : False,
+    },
+}
+
+# Conversation states
 WAITING_SINGLE = 1
 WAITING_BATCH  = 2
 ADMIN_ADD_ID   = 3
-ADMIN_ADD_EXP  = 4
+ADMIN_ADD_PLAN = 4
 ADMIN_REM_ID   = 5
 ADMIN_EXP_ID   = 6
-ADMIN_EXP_DATE = 7
+ADMIN_EXP_PLAN = 7
 
 
+# ================== DATA ==================
 def load_users():
     if DATA_FILE.exists():
         try:
@@ -45,72 +92,126 @@ def save_users(data):
 
 def get_or_create_user(user_id: int):
     users = load_users()
-    uid = str(user_id)
+    uid   = str(user_id)
     if uid not in users:
         users[uid] = {
-            "expiry": "", "added": date.today().isoformat(),
-            "is_premium": False, "free_used": 0, "total_searches": 0
+            "plan"          : "trial",
+            "expiry"        : "",
+            "added"         : date.today().isoformat(),
+            "is_premium"    : False,
+            "free_used"     : 0,
+            "total_searches": 0,
+            "daily_searches": 0,
+            "last_search_date": "",
         }
         save_users(users)
     return users[uid]
 
 def get_free_remaining(user_id: int) -> int:
     user_data = get_or_create_user(user_id)
-    used = user_data.get("free_used", 0)
+    used      = user_data.get("free_used", 0)
     return max(0, FREE_SEARCHES - used)
 
-def use_one_search(user_id: int):
-    users = load_users()
-    uid = str(user_id)
+def get_daily_remaining(user_id: int) -> int:
+    users     = load_users()
+    uid       = str(user_id)
     user_data = users.get(uid, {})
-    user_data["free_used"] = user_data.get("free_used", 0) + 1
-    user_data["total_searches"] = user_data.get("total_searches", 0) + 1
-    users[uid] = user_data
-    save_users(users)
+    plan_key  = user_data.get("plan", "trial")
+    plan      = PLANS.get(plan_key, PLANS["trial"])
 
-def use_premium_search(user_id: int):
-    users = load_users()
-    uid = str(user_id)
+    if plan.get("unlimited", False):
+        return 999999
+
+    daily_limit = plan.get("daily_limit", 0)
+    today       = date.today().isoformat()
+    last_date   = user_data.get("last_search_date", "")
+    daily_used  = user_data.get("daily_searches", 0)
+
+    if last_date != today:
+        return daily_limit
+
+    return max(0, daily_limit - daily_used)
+
+def use_one_search(user_id: int):
+    users     = load_users()
+    uid       = str(user_id)
     user_data = users.get(uid, {})
+    today     = date.today().isoformat()
+
+    if user_data.get("last_search_date", "") != today:
+        user_data["daily_searches"]   = 0
+        user_data["last_search_date"] = today
+
+    plan_key = user_data.get("plan", "trial")
+    plan     = PLANS.get(plan_key, PLANS["trial"])
+
+    if plan.get("is_free", True):
+        user_data["free_used"] = user_data.get("free_used", 0) + 1
+    else:
+        user_data["daily_searches"] = user_data.get("daily_searches", 0) + 1
+
     user_data["total_searches"] = user_data.get("total_searches", 0) + 1
     users[uid] = user_data
     save_users(users)
 
 def check_access(user_id: int):
     get_or_create_user(user_id)
-    users = load_users()
-    uid = str(user_id)
+    users     = load_users()
+    uid       = str(user_id)
     user_data = users[uid]
-    is_premium = user_data.get("is_premium", False)
+    plan_key  = user_data.get("plan", "trial")
+    plan      = PLANS.get(plan_key, PLANS["trial"])
     expiry_str = user_data.get("expiry", "")
 
-    if is_premium and expiry_str:
+    # Premium plan check
+    if not plan.get("is_free", True) and expiry_str:
         try:
             expiry = date.fromisoformat(expiry_str)
             if date.today() > expiry:
+                # Plan expired, check free searches
                 free_left = get_free_remaining(user_id)
                 if free_left > 0:
-                    return True, f"⚠️ Premium expired | 🆓 {free_left} left", 0, False
-                return False, "❌ Premium expired & no free search left", 0, False
-            days = (expiry - date.today()).days
-            return True, f"✅ Premium ({days} days left)", days, True
+                    return True, "⚠️ Plan expired | 🆓 1 free left", 0, False, "trial"
+                return False, "❌ Plan expired! Renew karo.", 0, False, "trial"
+
+            days_left   = (expiry - date.today()).days
+            daily_rem   = get_daily_remaining(user_id)
+            daily_limit = plan.get("daily_limit", 0)
+            is_unlimited = plan.get("unlimited", False)
+
+            if is_unlimited:
+                status = f"✅ {plan['name']} | Unlimited | {days_left}d left"
+                return True, status, days_left, True, plan_key
+            else:
+                if daily_rem <= 0:
+                    return False, f"❌ Aaj ka limit khatam! ({daily_limit}/day) Kal aana.", days_left, True, plan_key
+                status = f"✅ {plan['name']} | {daily_rem}/{daily_limit} today | {days_left}d left"
+                return True, status, days_left, True, plan_key
         except:
             pass
 
+    # Free trial check
     free_left = get_free_remaining(user_id)
     if free_left > 0:
-        return True, f"🆓 Free ({free_left}/{FREE_SEARCHES} left)", 0, False
-    return False, "❌ Free search used! Buy subscription.", 0, False
+        return True, f"🆓 Trial ({free_left}/{FREE_SEARCHES} search left)", 0, False, "trial"
 
-def upgrade_to_paid(user_id: int, days: int):
-    users = load_users()
-    uid = str(user_id)
+    return False, "❌ Trial khatam! Plan lo.", 0, False, "trial"
+
+def upgrade_user(user_id: int, plan_key: str):
+    users     = load_users()
+    uid       = str(user_id)
     user_data = get_or_create_user(user_id)
-    expiry = (date.today() + timedelta(days=days)).isoformat()
-    user_data["expiry"] = expiry
-    user_data["is_premium"] = True
+    plan      = PLANS.get(plan_key, PLANS["7days"])
+    expiry    = (date.today() + timedelta(days=plan["days"])).isoformat()
+
+    user_data["plan"]           = plan_key
+    user_data["expiry"]         = expiry
+    user_data["is_premium"]     = True
+    user_data["daily_searches"] = 0
+    user_data["last_search_date"] = ""
     users[uid] = user_data
     save_users(users)
+    return expiry
     # ================== SKIP KEYS ==================
 SKIP_KEYS = {
     "timestamp", "response_time", "response_time_ms",
@@ -236,7 +337,7 @@ def format_result(number, data):
     if not isinstance(data, dict):
         return f"📱 *{number}*\n`{str(data)}`"
 
-    main_data = data.get("data", data)
+    main_data   = data.get("data", data)
     all_records = []
 
     if isinstance(main_data, dict):
@@ -265,12 +366,12 @@ def format_result(number, data):
     if not all_records:
         return f"📱 *{number}*\n_No data found_"
 
-    seen = set()
+    seen           = set()
     unique_records = []
     for rec in all_records:
         identifier = (
             str(rec.get("FullName", rec.get("Name", ""))).lower() +
-            str(rec.get("Phone", rec.get("Phone2", "")))
+            str(rec.get("Phone",    rec.get("Phone2", "")))
         )
         if identifier not in seen:
             seen.add(identifier)
@@ -302,17 +403,24 @@ def search_api(term: str):
         return {"ok": True, "data": r.json()}
     except Exception as e:
         return {"ok": False, "error": str(e)}
-        # ================== KEYBOARDS ==================
+
+# ================== KEYBOARDS ==================
 def main_menu_keyboard(user_id: int):
-    ok, _, _, is_premium = check_access(user_id)
-    free_left = get_free_remaining(user_id)
+    ok, _, _, is_premium, plan_key = check_access(user_id)
+    free_left  = get_free_remaining(user_id)
+    daily_rem  = get_daily_remaining(user_id)
 
     if is_premium:
-        search_label = "🔍 Single Search"
-        batch_label  = "📦 Batch Search"
+        plan    = PLANS.get(plan_key, PLANS["7days"])
+        if plan.get("unlimited", False):
+            search_label = "🔍 Search (Unlimited)"
+            batch_label  = "📦 Batch (Unlimited)"
+        else:
+            search_label = f"🔍 Search ({daily_rem} today)"
+            batch_label  = f"📦 Batch ({daily_rem} today)"
     elif free_left > 0:
-        search_label = f"🔍 Search ({free_left} free)"
-        batch_label  = f"📦 Batch ({free_left} free)"
+        search_label = f"🔍 Search ({free_left} trial)"
+        batch_label  = f"📦 Batch ({free_left} trial)"
     else:
         search_label = "🔍 Search (🔒)"
         batch_label  = "📦 Batch (🔒)"
@@ -327,7 +435,7 @@ def main_menu_keyboard(user_id: int):
             InlineKeyboardButton("📊 Status",     callback_data="status"),
         ],
         [
-            InlineKeyboardButton("💰 Buy Access", callback_data="buy"),
+            InlineKeyboardButton("💰 Buy Plan",   callback_data="buy"),
             InlineKeyboardButton("❓ Help",        callback_data="help"),
         ],
     ])
@@ -339,7 +447,7 @@ def admin_menu_keyboard():
             InlineKeyboardButton("❌ Remove User", callback_data="admin_remove"),
         ],
         [
-            InlineKeyboardButton("📅 Set Expiry", callback_data="admin_expiry"),
+            InlineKeyboardButton("📅 Set Plan",   callback_data="admin_expiry"),
             InlineKeyboardButton("📋 All Users",  callback_data="admin_list"),
         ],
         [
@@ -364,20 +472,19 @@ def buy_keyboard():
         [InlineKeyboardButton("🔙 Main Menu", callback_data="main_menu")]
     ])
 
-def duration_keyboard(prefix: str):
+def plan_keyboard(prefix: str):
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("7 Days",   callback_data=f"{prefix}_7"),
-            InlineKeyboardButton("30 Days",  callback_data=f"{prefix}_30"),
+            InlineKeyboardButton("🥉 7 Days  - ₹50",      callback_data=f"{prefix}_7days"),
+            InlineKeyboardButton("🥈 30 Days - ₹130",     callback_data=f"{prefix}_30days"),
         ],
         [
-            InlineKeyboardButton("90 Days",  callback_data=f"{prefix}_90"),
-            InlineKeyboardButton("365 Days", callback_data=f"{prefix}_365"),
+            InlineKeyboardButton("🥇 6 Months - ₹300",    callback_data=f"{prefix}_6months"),
+            InlineKeyboardButton("💎 12 Months - ₹799",   callback_data=f"{prefix}_12months"),
         ],
-        [InlineKeyboardButton("❌ Cancel", callback_data="admin_cancel")],
+        [InlineKeyboardButton("❌ Cancel",                 callback_data="admin_cancel")],
     ])
 
-# ================== HELPERS ==================
 async def safe_edit(query, text, reply_markup=None, parse_mode="Markdown"):
     try:
         await query.edit_message_text(
@@ -385,23 +492,28 @@ async def safe_edit(query, text, reply_markup=None, parse_mode="Markdown"):
         )
     except Exception:
         pass
-
-# ================== START & MENUS ==================
+        # ================== START ==================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     get_or_create_user(user.id)
-    ok, status, days, is_premium = check_access(user.id)
+    ok, status, days, is_premium, plan_key = check_access(user.id)
     free_left = get_free_remaining(user.id)
+    daily_rem = get_daily_remaining(user.id)
+    plan      = PLANS.get(plan_key, PLANS["trial"])
 
     if is_premium:
-        status_emoji, status_color = "💎", "Premium"
-    elif ok:
-        status_emoji, status_color = "🆓", "Free"
+        if plan.get("unlimited", False):
+            status_emoji = "💎"
+            status_color = "Premium Unlimited"
+        else:
+            status_emoji = "✅"
+            status_color = f"Premium ({plan['name']})"
+    elif free_left > 0:
+        status_emoji = "🆓"
+        status_color = "Trial"
     else:
-        status_emoji, status_color = "🔴", "Locked"
-
-    used = FREE_SEARCHES - free_left
-    bar  = "🟢" * free_left + "🔴" * used
+        status_emoji = "🔴"
+        status_color = "Locked"
 
     text = (
         f"{'━' * 30}\n"
@@ -412,10 +524,22 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📅 {status}\n\n"
     )
 
-    if not is_premium:
+    if is_premium and not plan.get("unlimited", False):
+        daily_limit = plan.get("daily_limit", 0)
+        used_today  = daily_limit - daily_rem
+        bar         = "🟢" * daily_rem + "🔴" * used_today
         text += (
             f"{'━' * 25}\n"
-            f"🆓 Free Search: {bar}\n"
+            f"📊 Today: {bar}\n"
+            f"   {daily_rem}/{daily_limit} remaining\n"
+            f"{'━' * 25}\n\n"
+        )
+    elif not is_premium:
+        used = FREE_SEARCHES - free_left
+        bar  = "🟢" * free_left + "🔴" * used
+        text += (
+            f"{'━' * 25}\n"
+            f"🆓 Trial: {bar}\n"
             f"   {free_left}/{FREE_SEARCHES} remaining\n"
             f"{'━' * 25}\n\n"
         )
@@ -423,236 +547,438 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text += "Choose an option below 👇"
 
     if update.callback_query:
-        await safe_edit(update.callback_query, text, reply_markup=main_menu_keyboard(user.id))
+        await safe_edit(
+            update.callback_query, text,
+            reply_markup=main_menu_keyboard(user.id)
+        )
     else:
-        await update.message.reply_text(text, reply_markup=main_menu_keyboard(user.id), parse_mode="Markdown")
+        await update.message.reply_text(
+            text,
+            reply_markup=main_menu_keyboard(user.id),
+            parse_mode="Markdown"
+        )
     return ConversationHandler.END
 
+
+# ================== PROFILE ==================
 async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    user = query.from_user
-    ok, status, days, is_premium = check_access(user.id)
-    free_left = get_free_remaining(user.id)
-    user_data = get_or_create_user(user.id)
-    total_s = user_data.get("total_searches", 0)
+    user                              = query.from_user
+    ok, status, days, is_premium, plan_key = check_access(user.id)
+    free_left                         = get_free_remaining(user.id)
+    daily_rem                         = get_daily_remaining(user.id)
+    user_data                         = get_or_create_user(user.id)
+    total_s                           = user_data.get("total_searches", 0)
+    plan                              = PLANS.get(plan_key, PLANS["trial"])
 
     if is_premium:
-        acc_type = "💎 Premium"
+        acc_type   = f"{plan['name']}"
         bar_length = 20
-        filled = min(int((days / 365) * bar_length), bar_length) if days > 0 else 0
-        bar = "█" * filled + "░" * (bar_length - filled)
-        expiry_info = f"📅 *Expires:* {user_data.get('expiry', 'N/A')}\n⏳ *Days Left:* {days}\n📈 `[{bar}]`\n"
+        filled     = min(int((days / plan["days"]) * bar_length), bar_length) if days > 0 else 0
+        bar        = "█" * filled + "░" * (bar_length - filled)
+
+        if plan.get("unlimited", False):
+            expiry_info = (
+                f"📅 *Expires:* {user_data.get('expiry', 'N/A')}\n"
+                f"⏳ *Days Left:* {days}\n"
+                f"🔍 *Daily Limit:* Unlimited\n"
+                f"📈 `[{bar}]`\n"
+            )
+        else:
+            daily_limit = plan.get("daily_limit", 0)
+            expiry_info = (
+                f"📅 *Expires:* {user_data.get('expiry', 'N/A')}\n"
+                f"⏳ *Days Left:* {days}\n"
+                f"🔍 *Today:* {daily_rem}/{daily_limit} remaining\n"
+                f"📈 `[{bar}]`\n"
+            )
     else:
-        acc_type = f"🆓 Free ({free_left} left)"
-        used = FREE_SEARCHES - free_left
-        bar = "🟢" * free_left + "🔴" * used
-        expiry_info = f"🆓 *Free Search:* {free_left}/{FREE_SEARCHES}\n📊 {bar}\n"
+        acc_type    = "🆓 Trial"
+        used        = FREE_SEARCHES - free_left
+        bar         = "🟢" * free_left + "🔴" * used
+        expiry_info = (
+            f"🆓 *Trial Search:* {free_left}/{FREE_SEARCHES}\n"
+            f"📊 {bar}\n"
+        )
 
     text = (
-        f"{'━' * 30}\n       👤 *Your Profile*\n{'━' * 30}\n\n"
-        f"🆔 *ID:* `{user.id}`\n👤 *Name:* {user.first_name} {user.last_name or ''}\n"
+        f"{'━' * 30}\n"
+        f"       👤 *Your Profile*\n"
+        f"{'━' * 30}\n\n"
+        f"🆔 *ID:* `{user.id}`\n"
+        f"👤 *Name:* {user.first_name} {user.last_name or ''}\n"
         f"📛 *Username:* @{user.username or 'N/A'}\n\n"
-        f"{'━' * 30}\n       🔐 *Account Info*\n{'━' * 30}\n\n"
-        f"📦 *Type:* {acc_type}\n{expiry_info}\n🔍 *Total Searches:* {total_s}\n"
+        f"{'━' * 30}\n"
+        f"       🔐 *Account Info*\n"
+        f"{'━' * 30}\n\n"
+        f"📦 *Plan:* {acc_type}\n"
+        f"{expiry_info}\n"
+        f"🔍 *Total Searches:* {total_s}\n"
     )
     await safe_edit(query, text, reply_markup=back_keyboard(user.id))
 
+
+# ================== STATUS ==================
 async def status_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    user = query.from_user
-    ok, status, days, is_premium = check_access(user.id)
-    free_left = get_free_remaining(user.id)
+    user                              = query.from_user
+    ok, status, days, is_premium, plan_key = check_access(user.id)
+    free_left                         = get_free_remaining(user.id)
+    daily_rem                         = get_daily_remaining(user.id)
+    plan                              = PLANS.get(plan_key, PLANS["trial"])
 
     if is_premium:
-        text = f"💎 *Account: PREMIUM*\n\n⏳ {days} days remaining\n📅 {status}\n\n✅ Unlimited searches!"
+        if plan.get("unlimited", False):
+            text = (
+                f"💎 *Account: PREMIUM*\n\n"
+                f"📦 Plan: {plan['name']}\n"
+                f"⏳ {days} days remaining\n"
+                f"🔍 Daily: *Unlimited*\n\n"
+                f"✅ Search karo!"
+            )
+        else:
+            daily_limit = plan.get("daily_limit", 0)
+            text = (
+                f"✅ *Account: PREMIUM*\n\n"
+                f"📦 Plan: {plan['name']}\n"
+                f"⏳ {days} days remaining\n"
+                f"🔍 Today: *{daily_rem}/{daily_limit}*\n\n"
+                f"💡 Kal reset hoga!"
+            )
     elif ok:
-        text = f"🆓 *Account: FREE*\n\n🔍 {free_left} search remaining\n📅 {status}\n\n💡 Buy Premium for unlimited:\n👉 {OWNER_CONTACT}"
+        text = (
+            f"🆓 *Account: TRIAL*\n\n"
+            f"🔍 {free_left} search remaining\n\n"
+            f"💡 Plans dekhne ke liye:\n"
+            f"👉 Buy Plan button dabao"
+        )
     else:
-        text = f"🔴 *Account: LOCKED*\n\n📅 {status}\n\n❌ Your {FREE_SEARCHES} free search is used!\n\n💰 Buy subscription:\n👉 {OWNER_CONTACT}\n\nYour ID: `{user.id}`"
+        text = (
+            f"🔴 *Account: LOCKED*\n\n"
+            f"📅 {status}\n\n"
+            f"❌ Koi search nahi bacha!\n\n"
+            f"💰 Plan lo:\n"
+            f"👉 {OWNER_CONTACT}\n\n"
+            f"Your ID: `{user.id}`"
+        )
     await safe_edit(query, text, reply_markup=back_keyboard(user.id))
 
+
+# ================== HELP ==================
 async def help_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     text = (
-        f"{'━' * 30}\n       ❓ *Help Guide*\n{'━' * 30}\n\n"
-        f"🆓 *Free Users*\n   {FREE_SEARCHES} free search only\n   After that, buy subscription.\n\n"
-        f"💎 *Premium Users*\n   Unlimited searches!\n\n"
-        f"🔍 *Single Search*\n   One number at a time\n   Example: `919876543210`\n\n"
-        f"📦 *Batch Search*\n   Comma separated numbers\n   Example: `9198...,9197...`\n   ⚠️ Each number = 1 search\n\n"
-        f"{'━' * 30}\n💡 *Tips:*\n   • Use country code (91 for India)\n   • No spaces or dashes\n   • Max 15 numbers in batch\n"
+        f"{'━' * 30}\n"
+        f"       ❓ *Help Guide*\n"
+        f"{'━' * 30}\n\n"
+        f"🆓 *Trial*\n"
+        f"   Sirf 1 free search\n\n"
+        f"💰 *Plans:*\n"
+        f"   🥉 7 Days  → ₹50  → 5/day\n"
+        f"   🥈 30 Days → ₹130 → 10/day\n"
+        f"   🥇 6 Month → ₹300 → 15/day\n"
+        f"   💎 12 Month→ ₹799 → Unlimited\n\n"
+        f"🔍 *Single Search*\n"
+        f"   Example: `919876543210`\n\n"
+        f"📦 *Batch Search*\n"
+        f"   Example: `9198...,9197...`\n"
+        f"   ⚠️ Each number = 1 search\n\n"
+        f"{'━' * 30}\n"
+        f"💡 *Tips:*\n"
+        f"   • Country code lagao (91)\n"
+        f"   • No spaces or dashes\n"
+        f"   • Daily limit midnight reset\n"
+        f"   • Max 15 batch mein\n"
     )
     await safe_edit(query, text, reply_markup=back_keyboard())
 
+
+# ================== BUY ==================
 async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
+    query     = update.callback_query
     await query.answer()
-    user = query.from_user
+    user      = query.from_user
     free_left = get_free_remaining(user.id)
+
     text = (
-        f"{'━' * 30}\n       💰 *Buy Access*\n{'━' * 30}\n\n"
-        f"🆓 Free used: {FREE_SEARCHES - free_left}/{FREE_SEARCHES}\n\n"
-        f"📋 *Premium Plans:*\n\n🥉 *7 Days*   → ₹50\n🥈 *30 Days*  → ₹150\n🥇 *90 Days*  → ₹300\n💎 *365 Days* → ₹999\n\n"
-        f"{'━' * 30}\n\n📱 Contact admin:\n👉 {OWNER_CONTACT}\n\nYour ID: `{user.id}`\n_Share this ID with admin_"
+        f"{'━' * 30}\n"
+        f"       💰 *Buy Plan*\n"
+        f"{'━' * 30}\n\n"
+        f"🆓 Trial: {FREE_SEARCHES - free_left}/{FREE_SEARCHES} used\n\n"
+        f"📋 *Available Plans:*\n\n"
+        f"🥉 *7 Days*\n"
+        f"   💵 ₹50 | 🔍 5 searches/day\n\n"
+        f"🥈 *30 Days*\n"
+        f"   💵 ₹130 | 🔍 10 searches/day\n\n"
+        f"🥇 *6 Months*\n"
+        f"   💵 ₹300 | 🔍 15 searches/day\n\n"
+        f"💎 *12 Months*\n"
+        f"   💵 ₹799 | 🔍 Unlimited\n\n"
+        f"{'━' * 30}\n\n"
+        f"📱 Contact admin:\n"
+        f"👉 {OWNER_CONTACT}\n\n"
+        f"Your ID: `{user.id}`\n"
+        f"_Admin ko ye ID do_"
     )
     await safe_edit(query, text, reply_markup=buy_keyboard())
-    # ================== SINGLE SEARCH ==================
+
+
+# ================== SINGLE SEARCH ==================
 async def single_search_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    user = query.from_user
-    ok, status, _, is_premium = check_access(user.id)
-    free_left = get_free_remaining(user.id)
+    user                              = query.from_user
+    ok, status, _, is_premium, plan_key = check_access(user.id)
+    free_left                         = get_free_remaining(user.id)
+    daily_rem                         = get_daily_remaining(user.id)
+    plan                              = PLANS.get(plan_key, PLANS["trial"])
 
     if not ok:
         await safe_edit(
             query,
-            f"🔒 *Search Locked!*\n\n{status}\n\n💰 Buy subscription:\n👉 {OWNER_CONTACT}\n\nYour ID: `{user.id}`",
+            f"🔒 *Search Locked!*\n\n"
+            f"{status}\n\n"
+            f"💰 Plan lo:\n"
+            f"👉 {OWNER_CONTACT}\n\n"
+            f"Your ID: `{user.id}`",
             reply_markup=buy_keyboard(),
         )
         return ConversationHandler.END
 
-    info = "💎 Premium — Unlimited" if is_premium else f"🆓 {free_left} search remaining"
+    if is_premium:
+        if plan.get("unlimited", False):
+            info = "💎 Unlimited searches"
+        else:
+            daily_limit = plan.get("daily_limit", 0)
+            info = f"✅ {daily_rem}/{daily_limit} searches today"
+    else:
+        info = f"🆓 {free_left} trial search"
+
     await safe_edit(
         query,
-        f"🔍 *Single Search Mode*\n\n📊 {info}\n\n📱 Enter phone number:\n_Example: 919876543210_\n\nType /cancel to go back",
+        f"🔍 *Single Search Mode*\n\n"
+        f"📊 {info}\n\n"
+        f"📱 Phone number daalo:\n"
+        f"_Example: 919876543210_\n\n"
+        f"Type /cancel to go back",
     )
     return WAITING_SINGLE
 
+
 async def single_search_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
     number = update.message.text.strip()
-    user = update.effective_user
+    user   = update.effective_user
 
     if not number.isdigit():
-        await update.message.reply_text("❌ Invalid! Only digits.\nTry again or /cancel")
+        await update.message.reply_text(
+            "❌ Invalid! Sirf numbers.\nTry again or /cancel"
+        )
         return WAITING_SINGLE
 
-    ok, status, _, is_premium = check_access(user.id)
+    ok, status, _, is_premium, plan_key = check_access(user.id)
     if not ok:
         await update.message.reply_text(
             f"🔒 *Locked!*\n{status}\n💰 {OWNER_CONTACT}",
-            reply_markup=buy_keyboard(), parse_mode="Markdown"
+            reply_markup=buy_keyboard(),
+            parse_mode="Markdown"
         )
         return ConversationHandler.END
 
-    msg = await update.message.reply_text("🔍 Searching...")
+    msg    = await update.message.reply_text("🔍 Searching...")
     result = search_api(number)
 
     if result["ok"]:
-        if is_premium:
-            use_premium_search(user.id)
-        else:
-            use_one_search(user.id)
+        use_one_search(user.id)
         free_left = get_free_remaining(user.id)
-        text = format_result(number, result["data"])
-        if not is_premium:
-            text += f"\n\n{'━' * 25}\n🆓 Remaining: *{free_left}/{FREE_SEARCHES}*"
-        await msg.edit_text(text, reply_markup=main_menu_keyboard(user.id), parse_mode="Markdown")
+        daily_rem = get_daily_remaining(user.id)
+        plan      = PLANS.get(plan_key, PLANS["trial"])
+        text      = format_result(number, result["data"])
+
+        if is_premium and not plan.get("unlimited", False):
+            daily_limit = plan.get("daily_limit", 0)
+            text += (
+                f"\n\n{'━' * 25}\n"
+                f"📊 Today: *{daily_rem}/{daily_limit}* remaining"
+            )
+        elif not is_premium:
+            text += (
+                f"\n\n{'━' * 25}\n"
+                f"🆓 Trial: *{free_left}/{FREE_SEARCHES}* remaining"
+            )
+
+        await msg.edit_text(
+            text,
+            reply_markup=main_menu_keyboard(user.id),
+            parse_mode="Markdown"
+        )
     else:
         await msg.edit_text(
             f"❌ *Search Failed*\n\nError: `{result['error']}`",
-            reply_markup=back_keyboard(user.id), parse_mode="Markdown",
+            reply_markup=back_keyboard(user.id),
+            parse_mode="Markdown",
         )
     return ConversationHandler.END
+
 
 # ================== BATCH SEARCH ==================
 async def batch_search_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    user = query.from_user
-    ok, status, _, is_premium = check_access(user.id)
-    free_left = get_free_remaining(user.id)
+    user                              = query.from_user
+    ok, status, _, is_premium, plan_key = check_access(user.id)
+    free_left                         = get_free_remaining(user.id)
+    daily_rem                         = get_daily_remaining(user.id)
+    plan                              = PLANS.get(plan_key, PLANS["trial"])
 
     if not ok:
         await safe_edit(
             query,
-            f"🔒 *Search Locked!*\n\n{status}\n\n💰 {OWNER_CONTACT}",
+            f"🔒 *Search Locked!*\n\n{status}\n\n"
+            f"💰 {OWNER_CONTACT}",
             reply_markup=buy_keyboard(),
         )
         return ConversationHandler.END
 
-    info = "💎 Unlimited" if is_premium else f"🆓 {free_left} search left"
+    if is_premium:
+        if plan.get("unlimited", False):
+            info = "💎 Unlimited"
+        else:
+            daily_limit = plan.get("daily_limit", 0)
+            info = f"✅ {daily_rem}/{daily_limit} today"
+    else:
+        info = f"🆓 {free_left} trial"
+
     await safe_edit(
         query,
-        f"📦 *Batch Search Mode*\n\n📊 {info}\n\n📱 Enter numbers (comma separated):\n_Example: 9198...,9197...,9196..._\n_Max 15 numbers at once_\n\nType /cancel to go back",
+        f"📦 *Batch Search Mode*\n\n"
+        f"📊 {info}\n\n"
+        f"📱 Numbers daalo (comma se alag):\n"
+        f"_Example: 9198...,9197...,9196..._\n"
+        f"_Max 15 ek baar mein_\n\n"
+        f"Type /cancel to go back",
     )
     return WAITING_BATCH
 
+
 async def batch_search_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    raw = update.message.text.strip()
-    user = update.effective_user
+    raw     = update.message.text.strip()
+    user    = update.effective_user
     numbers = [n.strip() for n in raw.replace(",", " ").split() if n.strip()]
 
     if not numbers:
-        await update.message.reply_text("❌ No numbers! Try again or /cancel")
+        await update.message.reply_text("❌ Koi number nahi! Try again or /cancel")
         return WAITING_BATCH
 
-    numbers = numbers[:15]
-    total = len(numbers)
-    ok, status, _, is_premium = check_access(user.id)
-    free_left = get_free_remaining(user.id)
+    numbers                           = numbers[:15]
+    total                             = len(numbers)
+    ok, status, _, is_premium, plan_key = check_access(user.id)
+    free_left                         = get_free_remaining(user.id)
+    daily_rem                         = get_daily_remaining(user.id)
+    plan                              = PLANS.get(plan_key, PLANS["trial"])
 
-    if not is_premium and total > free_left:
+    available = 999999 if plan.get("unlimited", False) else (
+        daily_rem if is_premium else free_left
+    )
+
+    if total > available:
         await update.message.reply_text(
-            f"❌ *Not enough searches!*\n\nYou entered: *{total}* numbers\nAvailable: *{free_left}* search\n\n💡 You can only search *{free_left}* number\nOr buy premium for unlimited.\n👉 {OWNER_CONTACT}",
-            reply_markup=buy_keyboard(), parse_mode="Markdown"
+            f"❌ *Searches kam hain!*\n\n"
+            f"Aapne daala: *{total}* numbers\n"
+            f"Available: *{available}* searches\n\n"
+            f"💡 Max *{available}* numbers dalein\n"
+            f"Ya premium lo unlimited ke liye\n"
+            f"👉 {OWNER_CONTACT}",
+            reply_markup=buy_keyboard(),
+            parse_mode="Markdown"
         )
         return ConversationHandler.END
 
-    msg = await update.message.reply_text(f"🚀 Processing {total} numbers...\n[{'░' * total}]")
+    msg = await update.message.reply_text(
+        f"🚀 Processing {total} numbers...\n[{'░' * total}]"
+    )
 
     for i, num in enumerate(numbers, 1):
-        result = search_api(num)
+        result   = search_api(num)
         progress = "█" * i + "░" * (total - i)
+
         if result["ok"]:
-            if is_premium:
-                use_premium_search(user.id)
-            else:
-                use_one_search(user.id)
+            use_one_search(user.id)
             text = format_result(num, result["data"])
             await update.message.reply_text(text, parse_mode="Markdown")
         else:
-            await update.message.reply_text(f"❌ *{num}*\n`{result['error']}`", parse_mode="Markdown")
+            await update.message.reply_text(
+                f"❌ *{num}*\n`{result['error']}`",
+                parse_mode="Markdown"
+            )
         try:
-            await msg.edit_text(f"🚀 Processing... ({i}/{total})\n[{progress}]")
+            await msg.edit_text(
+                f"🚀 Processing... ({i}/{total})\n[{progress}]"
+            )
         except:
             pass
 
+    daily_rem = get_daily_remaining(user.id)
     free_left = get_free_remaining(user.id)
-    summary = f"✅ *Batch Complete!*\n📊 Processed: {total} numbers"
-    if not is_premium:
-        summary += f"\n🆓 Remaining: *{free_left}/{FREE_SEARCHES}*"
-    await msg.edit_text(summary, reply_markup=main_menu_keyboard(user.id), parse_mode="Markdown")
+    summary   = f"✅ *Batch Complete!*\n📊 Processed: {total} numbers"
+
+    if is_premium and not plan.get("unlimited", False):
+        daily_limit = plan.get("daily_limit", 0)
+        summary += f"\n📊 Today Left: *{daily_rem}/{daily_limit}*"
+    elif not is_premium:
+        summary += f"\n🆓 Trial Left: *{free_left}/{FREE_SEARCHES}*"
+
+    await msg.edit_text(
+        summary,
+        reply_markup=main_menu_keyboard(user.id),
+        parse_mode="Markdown",
+    )
     return ConversationHandler.END
+
 
 # ================== CANCEL ==================
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    await update.message.reply_text("❌ Cancelled.", reply_markup=main_menu_keyboard(user.id))
+    await update.message.reply_text(
+        "❌ Cancelled.",
+        reply_markup=main_menu_keyboard(user.id)
+    )
     return ConversationHandler.END
-
-# ================== ADMIN ==================
+    # ================== ADMIN ==================
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         if update.message:
             await update.message.reply_text("❌ Admin only!")
         return ConversationHandler.END
 
-    users = load_users()
-    total = len(users)
-    premium = sum(1 for u in users.values() if u.get("is_premium", False))
-    free_u = total - premium
+    users    = load_users()
+    total    = len(users)
+    premium  = sum(1 for u in users.values() if u.get("is_premium", False))
+    free_u   = total - premium
+
     text = (
-        f"{'━' * 30}\n       🛠️ *Admin Panel*\n{'━' * 30}\n\n"
-        f"👥 Total: {total} | 💎 Premium: {premium} | 🆓 Free: {free_u}\n\nChoose an action:"
+        f"{'━' * 30}\n"
+        f"       🛠️ *Admin Panel*\n"
+        f"{'━' * 30}\n\n"
+        f"👥 Total: {total} | 💎 Premium: {premium} | 🆓 Trial: {free_u}\n\n"
+        f"Choose an action:"
     )
+
     if update.callback_query:
-        await safe_edit(update.callback_query, text, reply_markup=admin_menu_keyboard())
+        await safe_edit(
+            update.callback_query, text,
+            reply_markup=admin_menu_keyboard()
+        )
     else:
-        await update.message.reply_text(text, reply_markup=admin_menu_keyboard(), parse_mode="Markdown")
+        await update.message.reply_text(
+            text,
+            reply_markup=admin_menu_keyboard(),
+            parse_mode="Markdown"
+        )
     return ConversationHandler.END
+
 
 async def admin_add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -660,8 +986,14 @@ async def admin_add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer("❌")
         return ConversationHandler.END
     await query.answer()
-    await safe_edit(query, "➕ *Add Premium User*\n\nEnter Telegram User ID:\n\n/cancel to go back")
+    await safe_edit(
+        query,
+        "➕ *Add Premium User*\n\n"
+        "Telegram User ID daalo:\n\n"
+        "/cancel to go back"
+    )
     return ADMIN_ADD_ID
+
 
 async def admin_add_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.message.text.strip()
@@ -670,28 +1002,46 @@ async def admin_add_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ADMIN_ADD_ID
     context.user_data["new_uid"] = uid
     await update.message.reply_text(
-        f"✅ User ID: `{uid}`\n\nSelect duration:",
-        reply_markup=duration_keyboard("exp"), parse_mode="Markdown",
+        f"✅ User ID: `{uid}`\n\nPlan select karo:",
+        reply_markup=plan_keyboard("addplan"),
+        parse_mode="Markdown",
     )
-    return ADMIN_ADD_EXP
+    return ADMIN_ADD_PLAN
 
-async def admin_add_expiry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+async def admin_add_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+
     if query.data == "admin_cancel":
         await admin_panel(update, context)
         return ConversationHandler.END
-    days_map = {"exp_7": 7, "exp_30": 30, "exp_90": 90, "exp_365": 365}
-    days = days_map.get(query.data, 30)
-    uid = context.user_data.get("new_uid")
-    upgrade_to_paid(int(uid), days)
-    expiry = (date.today() + timedelta(days=days)).isoformat()
+
+    plan_map = {
+        "addplan_7days"  : "7days",
+        "addplan_30days" : "30days",
+        "addplan_6months": "6months",
+        "addplan_12months": "12months",
+    }
+
+    plan_key = plan_map.get(query.data, "7days")
+    uid      = context.user_data.get("new_uid")
+    plan     = PLANS.get(plan_key, PLANS["7days"])
+    expiry   = upgrade_user(int(uid), plan_key)
+
     await safe_edit(
         query,
-        f"✅ *Premium Added!*\n\n🆔 ID: `{uid}`\n📅 Expiry: `{expiry}`\n⏳ {days} days",
+        f"✅ *Plan Added!*\n\n"
+        f"🆔 ID: `{uid}`\n"
+        f"📦 Plan: {plan['name']}\n"
+        f"💵 Price: ₹{plan['price']}\n"
+        f"🔍 Daily: {plan['daily_limit'] if not plan['unlimited'] else 'Unlimited'}\n"
+        f"📅 Expiry: `{expiry}`\n"
+        f"⏳ Days: {plan['days']}",
         reply_markup=admin_menu_keyboard(),
     )
     return ConversationHandler.END
+
 
 async def admin_remove_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -699,19 +1049,34 @@ async def admin_remove_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.answer("❌")
         return ConversationHandler.END
     await query.answer()
-    await safe_edit(query, "❌ *Remove User*\n\nEnter Telegram User ID:\n\n/cancel to go back")
+    await safe_edit(
+        query,
+        "❌ *Remove User*\n\n"
+        "Telegram User ID daalo:\n\n"
+        "/cancel to go back"
+    )
     return ADMIN_REM_ID
 
+
 async def admin_remove_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.message.text.strip()
+    uid   = update.message.text.strip()
     users = load_users()
     if uid in users:
         del users[uid]
         save_users(users)
-        await update.message.reply_text(f"✅ User `{uid}` removed!", reply_markup=admin_menu_keyboard(), parse_mode="Markdown")
+        await update.message.reply_text(
+            f"✅ User `{uid}` removed!",
+            reply_markup=admin_menu_keyboard(),
+            parse_mode="Markdown"
+        )
     else:
-        await update.message.reply_text(f"❌ User `{uid}` not found!", reply_markup=admin_menu_keyboard(), parse_mode="Markdown")
+        await update.message.reply_text(
+            f"❌ User `{uid}` not found!",
+            reply_markup=admin_menu_keyboard(),
+            parse_mode="Markdown"
+        )
     return ConversationHandler.END
+
 
 async def admin_expiry_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -719,35 +1084,59 @@ async def admin_expiry_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.answer("❌")
         return ConversationHandler.END
     await query.answer()
-    await safe_edit(query, "📅 *Set Expiry*\n\nEnter User ID:\n\n/cancel to go back")
+    await safe_edit(
+        query,
+        "📅 *Set User Plan*\n\n"
+        "User ID daalo:\n\n"
+        "/cancel to go back"
+    )
     return ADMIN_EXP_ID
+
 
 async def admin_expiry_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.message.text.strip()
     context.user_data["exp_uid"] = uid
     await update.message.reply_text(
-        f"User: `{uid}`\nSelect duration:",
-        reply_markup=duration_keyboard("setexp"), parse_mode="Markdown",
+        f"User: `{uid}`\nPlan select karo:",
+        reply_markup=plan_keyboard("setplan"),
+        parse_mode="Markdown",
     )
-    return ADMIN_EXP_DATE
+    return ADMIN_EXP_PLAN
+
 
 async def admin_expiry_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+
     if query.data == "admin_cancel":
         await admin_panel(update, context)
         return ConversationHandler.END
-    days_map = {"setexp_7": 7, "setexp_30": 30, "setexp_90": 90, "setexp_365": 365}
-    days = days_map.get(query.data, 30)
-    uid = context.user_data.get("exp_uid")
-    upgrade_to_paid(int(uid), days)
-    expiry = (date.today() + timedelta(days=days)).isoformat()
+
+    plan_map = {
+        "setplan_7days"   : "7days",
+        "setplan_30days"  : "30days",
+        "setplan_6months" : "6months",
+        "setplan_12months": "12months",
+    }
+
+    plan_key = plan_map.get(query.data, "7days")
+    uid      = context.user_data.get("exp_uid")
+    plan     = PLANS.get(plan_key, PLANS["7days"])
+    expiry   = upgrade_user(int(uid), plan_key)
+
     await safe_edit(
         query,
-        f"✅ *Upgraded to Premium!*\n\n🆔 User: `{uid}`\n📅 Expiry: `{expiry}`\n⏳ {days} days",
+        f"✅ *Plan Updated!*\n\n"
+        f"🆔 User: `{uid}`\n"
+        f"📦 Plan: {plan['name']}\n"
+        f"💵 Price: ₹{plan['price']}\n"
+        f"🔍 Daily: {plan['daily_limit'] if not plan['unlimited'] else 'Unlimited'}\n"
+        f"📅 Expiry: `{expiry}`\n"
+        f"⏳ Days: {plan['days']}",
         reply_markup=admin_menu_keyboard(),
     )
     return ConversationHandler.END
+
 
 async def admin_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -756,16 +1145,23 @@ async def admin_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await query.answer()
     users = load_users()
+
     if not users:
-        await safe_edit(query, "📋 *No users yet!*", reply_markup=admin_menu_keyboard())
+        await safe_edit(
+            query, "📋 *No users yet!*",
+            reply_markup=admin_menu_keyboard()
+        )
         return
+
     text = f"{'━' * 30}\n📋 *All Users ({len(users)})*\n{'━' * 30}\n\n"
+
     for uid, info in users.items():
-        is_prem = info.get("is_premium", False)
-        acc_type = "💎" if is_prem else "🆓"
-        free_u = info.get("free_used", 0)
-        total_s = info.get("total_searches", 0)
-        exp = info.get("expiry", "")
+        is_prem  = info.get("is_premium", False)
+        plan_key = info.get("plan", "trial")
+        plan     = PLANS.get(plan_key, PLANS["trial"])
+        total_s  = info.get("total_searches", 0)
+        exp      = info.get("expiry", "")
+
         if is_prem and exp:
             try:
                 exp_date = date.fromisoformat(exp)
@@ -777,10 +1173,15 @@ async def admin_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except:
                 s = "⚪ N/A"
         else:
-            left = max(0, FREE_SEARCHES - free_u)
-            s = f"🔍 {left}/{FREE_SEARCHES} free"
-        text += f"{acc_type} `{uid}` | {s} | 🔍{total_s}\n"
+            free_u = info.get("free_used", 0)
+            left   = max(0, FREE_SEARCHES - free_u)
+            s      = f"🆓 {left}/{FREE_SEARCHES} trial"
+
+        plan_emoji = plan.get("name", "🆓 Trial").split()[0]
+        text += f"{plan_emoji} `{uid}` | {s} | 🔍{total_s}\n"
+
     await safe_edit(query, text[:4000], reply_markup=admin_menu_keyboard())
+
 
 async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -789,50 +1190,70 @@ async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await query.answer()
     users = load_users()
-    total = len(users)
-    premium_act = premium_exp = free_active = free_done = total_searches = 0
+
+    total          = len(users)
+    total_searches = 0
+    plan_counts    = {k: 0 for k in PLANS.keys()}
+    expired        = 0
+
     for info in users.values():
-        is_prem = info.get("is_premium", False)
         total_searches += info.get("total_searches", 0)
-        if is_prem:
+        plan_key        = info.get("plan", "trial")
+        is_prem         = info.get("is_premium", False)
+        exp             = info.get("expiry", "")
+
+        if is_prem and exp:
             try:
-                exp = date.fromisoformat(info.get("expiry", "2000-01-01"))
-                if date.today() <= exp:
-                    premium_act += 1
+                exp_date = date.fromisoformat(exp)
+                if date.today() > exp_date:
+                    expired += 1
                 else:
-                    premium_exp += 1
+                    plan_counts[plan_key] = plan_counts.get(plan_key, 0) + 1
             except:
-                premium_exp += 1
+                expired += 1
         else:
-            if info.get("free_used", 0) < FREE_SEARCHES:
-                free_active += 1
-            else:
-                free_done += 1
+            plan_counts["trial"] = plan_counts.get("trial", 0) + 1
+
     text = (
-        f"{'━' * 30}\n       📊 *Bot Statistics*\n{'━' * 30}\n\n"
-        f"👥 *Total Users*    : {total}\n🔍 *Total Searches* : {total_searches}\n\n"
-        f"{'━' * 25}\n💎 *Premium*\n{'━' * 25}\n"
-        f"🟢 Active  : {premium_act}\n🔴 Expired : {premium_exp}\n\n"
-        f"{'━' * 25}\n🆓 *Free Users*\n{'━' * 25}\n"
-        f"🟢 Has search : {free_active}\n🔴 Used       : {free_done}\n\n"
+        f"{'━' * 30}\n"
+        f"       📊 *Bot Statistics*\n"
+        f"{'━' * 30}\n\n"
+        f"👥 *Total Users*    : {total}\n"
+        f"🔍 *Total Searches* : {total_searches}\n\n"
+        f"{'━' * 25}\n"
+        f"📦 *Plan Breakdown*\n"
+        f"{'━' * 25}\n"
+        f"🆓 Trial     : {plan_counts.get('trial', 0)}\n"
+        f"🥉 7 Days    : {plan_counts.get('7days', 0)}\n"
+        f"🥈 30 Days   : {plan_counts.get('30days', 0)}\n"
+        f"🥇 6 Months  : {plan_counts.get('6months', 0)}\n"
+        f"💎 12 Months : {plan_counts.get('12months', 0)}\n"
+        f"🔴 Expired   : {expired}\n\n"
         f"📅 Date: {date.today()}\n"
     )
     await safe_edit(query, text, reply_markup=admin_menu_keyboard())
+
 
 async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await start(update, context)
     return ConversationHandler.END
 
+
 # ================== MAIN ==================
 def main():
     request = HTTPXRequest(
-        connect_timeout=60.0, read_timeout=60.0,
-        write_timeout=60.0, pool_timeout=60.0,
+        connect_timeout=60.0,
+        read_timeout=60.0,
+        write_timeout=60.0,
+        pool_timeout=60.0,
     )
     get_updates_request = HTTPXRequest(
-        connect_timeout=60.0, read_timeout=60.0,
-        write_timeout=60.0, pool_timeout=60.0,
+        connect_timeout=60.0,
+        read_timeout=60.0,
+        write_timeout=60.0,
+        pool_timeout=60.0,
     )
+
     app = (
         ApplicationBuilder()
         .token(BOT_TOKEN)
@@ -842,40 +1263,100 @@ def main():
     )
 
     search_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(single_search_start, pattern="^single$")],
-        states={WAITING_SINGLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, single_search_process)]},
+        entry_points=[
+            CallbackQueryHandler(single_search_start, pattern="^single$")
+        ],
+        states={
+            WAITING_SINGLE: [
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND,
+                    single_search_process
+                )
+            ]
+        },
         fallbacks=[CommandHandler("cancel", cancel)],
-        per_message=False, allow_reentry=True,
+        per_message=False,
+        allow_reentry=True,
     )
+
     batch_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(batch_search_start, pattern="^batch$")],
-        states={WAITING_BATCH: [MessageHandler(filters.TEXT & ~filters.COMMAND, batch_search_process)]},
+        entry_points=[
+            CallbackQueryHandler(batch_search_start, pattern="^batch$")
+        ],
+        states={
+            WAITING_BATCH: [
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND,
+                    batch_search_process
+                )
+            ]
+        },
         fallbacks=[CommandHandler("cancel", cancel)],
-        per_message=False, allow_reentry=True,
+        per_message=False,
+        allow_reentry=True,
     )
+
     admin_add_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(admin_add_start, pattern="^admin_add$")],
+        entry_points=[
+            CallbackQueryHandler(admin_add_start, pattern="^admin_add$")
+        ],
         states={
-            ADMIN_ADD_ID:  [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_id)],
-            ADMIN_ADD_EXP: [CallbackQueryHandler(admin_add_expiry, pattern="^exp_|^admin_cancel$")],
+            ADMIN_ADD_ID: [
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND,
+                    admin_add_id
+                )
+            ],
+            ADMIN_ADD_PLAN: [
+                CallbackQueryHandler(
+                    admin_add_plan,
+                    pattern="^addplan_|^admin_cancel$"
+                )
+            ],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
-        per_message=False, allow_reentry=True,
+        per_message=False,
+        allow_reentry=True,
     )
+
     admin_remove_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(admin_remove_start, pattern="^admin_remove$")],
-        states={ADMIN_REM_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_remove_process)]},
-        fallbacks=[CommandHandler("cancel", cancel)],
-        per_message=False, allow_reentry=True,
-    )
-    admin_expiry_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(admin_expiry_start, pattern="^admin_expiry$")],
+        entry_points=[
+            CallbackQueryHandler(admin_remove_start, pattern="^admin_remove$")
+        ],
         states={
-            ADMIN_EXP_ID:   [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_expiry_id)],
-            ADMIN_EXP_DATE: [CallbackQueryHandler(admin_expiry_set, pattern="^setexp_|^admin_cancel$")],
+            ADMIN_REM_ID: [
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND,
+                    admin_remove_process
+                )
+            ]
         },
         fallbacks=[CommandHandler("cancel", cancel)],
-        per_message=False, allow_reentry=True,
+        per_message=False,
+        allow_reentry=True,
+    )
+
+    admin_expiry_conv = ConversationHandler(
+        entry_points=[
+            CallbackQueryHandler(admin_expiry_start, pattern="^admin_expiry$")
+        ],
+        states={
+            ADMIN_EXP_ID: [
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND,
+                    admin_expiry_id
+                )
+            ],
+            ADMIN_EXP_PLAN: [
+                CallbackQueryHandler(
+                    admin_expiry_set,
+                    pattern="^setplan_|^admin_cancel$"
+                )
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+        per_message=False,
+        allow_reentry=True,
     )
 
     app.add_handler(search_conv)
@@ -883,8 +1364,10 @@ def main():
     app.add_handler(admin_add_conv)
     app.add_handler(admin_remove_conv)
     app.add_handler(admin_expiry_conv)
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("admin", admin_panel))
+
+    app.add_handler(CommandHandler("start",  start))
+    app.add_handler(CommandHandler("admin",  admin_panel))
+
     app.add_handler(CallbackQueryHandler(profile,            pattern="^profile$"))
     app.add_handler(CallbackQueryHandler(status_check,       pattern="^status$"))
     app.add_handler(CallbackQueryHandler(help_menu,          pattern="^help$"))
@@ -895,13 +1378,20 @@ def main():
 
     print("🤖 Bot is running...")
     print(f"👤 Admin ID      : {ADMIN_ID}")
+    print(f"🔑 PIN           : {DEFAULT_PIN}")
     print(f"🆓 Free Searches : {FREE_SEARCHES}")
+    print("📦 Plans:")
+    for k, v in PLANS.items():
+        if not v["is_free"]:
+            limit = "Unlimited" if v["unlimited"] else f"{v['daily_limit']}/day"
+            print(f"   {v['name']} | ₹{v['price']} | {limit}")
     print("⏹  Press Ctrl+C to stop\n")
 
     app.run_polling(
         drop_pending_updates=True,
         allowed_updates=["message", "callback_query"],
     )
+
 
 if __name__ == "__main__":
     main()
