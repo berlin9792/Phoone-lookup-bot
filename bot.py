@@ -18,6 +18,7 @@ from telegram.request import HTTPXRequest
 # ================== CONFIG ==================
 BOT_TOKEN     = "8642873626:AAFy5F79opcK_NMJ7NgGItd6sRrfbOc4TJU"
 ADMIN_ID      = 5057489358
+ADMIN_IDS     = [5057489358, 1968142314]
 DEFAULT_PIN   = "912036"
 API_URL       = "https://lk-api-pinsstm.ramaxinfo.workers.dev/"
 DATA_FILE     = Path("users.json")
@@ -69,13 +70,24 @@ PLANS = {
 }
 
 # Conversation states
-WAITING_SINGLE = 1
-WAITING_BATCH  = 2
-ADMIN_ADD_ID   = 3
-ADMIN_ADD_PLAN = 4
-ADMIN_REM_ID   = 5
-ADMIN_EXP_ID   = 6
-ADMIN_EXP_PLAN = 7
+WAITING_SINGLE         = 1
+WAITING_BATCH          = 2
+ADMIN_ADD_ID           = 3
+ADMIN_ADD_PLAN         = 4
+ADMIN_REM_ID           = 5
+ADMIN_EXP_ID           = 6
+ADMIN_EXP_PLAN         = 7
+WAITING_COUNTRY_SINGLE = 8   # ✅ New: country select for single
+WAITING_COUNTRY_BATCH  = 9   # ✅ New: country select for batch
+WAITING_SINGLE_INDIA   = 10  # ✅ New: indian number input
+WAITING_SINGLE_OTHER   = 11  # ✅ New: other country number input
+WAITING_BATCH_INDIA    = 12  # ✅ New: indian batch input
+WAITING_BATCH_OTHER    = 13  # ✅ New: other country batch input
+
+
+# ================== ADMIN CHECK ==================
+def is_admin(user_id: int) -> bool:
+    return user_id in ADMIN_IDS
 
 
 # ================== DATA ==================
@@ -95,13 +107,13 @@ def get_or_create_user(user_id: int):
     uid   = str(user_id)
     if uid not in users:
         users[uid] = {
-            "plan"          : "trial",
-            "expiry"        : "",
-            "added"         : date.today().isoformat(),
-            "is_premium"    : False,
-            "free_used"     : 0,
-            "total_searches": 0,
-            "daily_searches": 0,
+            "plan"            : "trial",
+            "expiry"          : "",
+            "added"           : date.today().isoformat(),
+            "is_premium"      : False,
+            "free_used"       : 0,
+            "total_searches"  : 0,
+            "daily_searches"  : 0,
             "last_search_date": "",
         }
         save_users(users)
@@ -156,27 +168,25 @@ def use_one_search(user_id: int):
 
 def check_access(user_id: int):
     get_or_create_user(user_id)
-    users     = load_users()
-    uid       = str(user_id)
-    user_data = users[uid]
-    plan_key  = user_data.get("plan", "trial")
-    plan      = PLANS.get(plan_key, PLANS["trial"])
+    users      = load_users()
+    uid        = str(user_id)
+    user_data  = users[uid]
+    plan_key   = user_data.get("plan", "trial")
+    plan       = PLANS.get(plan_key, PLANS["trial"])
     expiry_str = user_data.get("expiry", "")
 
-    # Premium plan check
     if not plan.get("is_free", True) and expiry_str:
         try:
             expiry = date.fromisoformat(expiry_str)
             if date.today() > expiry:
-                # Plan expired, check free searches
                 free_left = get_free_remaining(user_id)
                 if free_left > 0:
                     return True, "⚠️ Plan expired | 🆓 1 free left", 0, False, "trial"
                 return False, "❌ Plan expired! Renew karo.", 0, False, "trial"
 
-            days_left   = (expiry - date.today()).days
-            daily_rem   = get_daily_remaining(user_id)
-            daily_limit = plan.get("daily_limit", 0)
+            days_left    = (expiry - date.today()).days
+            daily_rem    = get_daily_remaining(user_id)
+            daily_limit  = plan.get("daily_limit", 0)
             is_unlimited = plan.get("unlimited", False)
 
             if is_unlimited:
@@ -190,7 +200,6 @@ def check_access(user_id: int):
         except:
             pass
 
-    # Free trial check
     free_left = get_free_remaining(user_id)
     if free_left > 0:
         return True, f"🆓 Trial ({free_left}/{FREE_SEARCHES} search left)", 0, False, "trial"
@@ -204,15 +213,17 @@ def upgrade_user(user_id: int, plan_key: str):
     plan      = PLANS.get(plan_key, PLANS["7days"])
     expiry    = (date.today() + timedelta(days=plan["days"])).isoformat()
 
-    user_data["plan"]           = plan_key
-    user_data["expiry"]         = expiry
-    user_data["is_premium"]     = True
-    user_data["daily_searches"] = 0
+    user_data["plan"]             = plan_key
+    user_data["expiry"]           = expiry
+    user_data["is_premium"]       = True
+    user_data["daily_searches"]   = 0
     user_data["last_search_date"] = ""
     users[uid] = user_data
     save_users(users)
     return expiry
-    # ================== SKIP KEYS ==================
+
+
+# ================== SKIP KEYS ==================
 SKIP_KEYS = {
     "timestamp", "response_time", "response_time_ms",
     "developer", "owner", "credit", "credits",
@@ -404,14 +415,15 @@ def search_api(term: str):
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
+
 # ================== KEYBOARDS ==================
 def main_menu_keyboard(user_id: int):
     ok, _, _, is_premium, plan_key = check_access(user_id)
-    free_left  = get_free_remaining(user_id)
-    daily_rem  = get_daily_remaining(user_id)
+    free_left = get_free_remaining(user_id)
+    daily_rem = get_daily_remaining(user_id)
 
     if is_premium:
-        plan    = PLANS.get(plan_key, PLANS["7days"])
+        plan = PLANS.get(plan_key, PLANS["7days"])
         if plan.get("unlimited", False):
             search_label = "🔍 Search (Unlimited)"
             batch_label  = "📦 Batch (Unlimited)"
@@ -437,6 +449,27 @@ def main_menu_keyboard(user_id: int):
         [
             InlineKeyboardButton("💰 Buy Plan",   callback_data="buy"),
             InlineKeyboardButton("❓ Help",        callback_data="help"),
+        ],
+    ])
+
+# ✅ Country selection keyboard for single search
+def country_select_keyboard(mode: str):
+    """mode = 'single' or 'batch'"""
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(
+                "🇮🇳 Indian Number (+91)",
+                callback_data=f"country_india_{mode}"
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                "🌍 Other Country (Manual Code)",
+                callback_data=f"country_other_{mode}"
+            ),
+        ],
+        [
+            InlineKeyboardButton("❌ Cancel", callback_data="main_menu"),
         ],
     ])
 
@@ -475,14 +508,14 @@ def buy_keyboard():
 def plan_keyboard(prefix: str):
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🥉 7 Days  - ₹50",      callback_data=f"{prefix}_7days"),
-            InlineKeyboardButton("🥈 30 Days - ₹130",     callback_data=f"{prefix}_30days"),
+            InlineKeyboardButton("🥉 7 Days  - ₹50",    callback_data=f"{prefix}_7days"),
+            InlineKeyboardButton("🥈 30 Days - ₹130",   callback_data=f"{prefix}_30days"),
         ],
         [
-            InlineKeyboardButton("🥇 6 Months - ₹300",    callback_data=f"{prefix}_6months"),
-            InlineKeyboardButton("💎 12 Months - ₹799",   callback_data=f"{prefix}_12months"),
+            InlineKeyboardButton("🥇 6 Months - ₹300",  callback_data=f"{prefix}_6months"),
+            InlineKeyboardButton("💎 12 Months - ₹799", callback_data=f"{prefix}_12months"),
         ],
-        [InlineKeyboardButton("❌ Cancel",                 callback_data="admin_cancel")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="admin_cancel")],
     ])
 
 async def safe_edit(query, text, reply_markup=None, parse_mode="Markdown"):
@@ -492,7 +525,9 @@ async def safe_edit(query, text, reply_markup=None, parse_mode="Markdown"):
         )
     except Exception:
         pass
-        # ================== START ==================
+
+
+# ================== START ==================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     get_or_create_user(user.id)
@@ -544,6 +579,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"{'━' * 25}\n\n"
         )
 
+    if is_admin(user.id):
+        text += f"🛡️ *Admin Access Active*\n\n"
+
     text += "Choose an option below 👇"
 
     if update.callback_query:
@@ -564,13 +602,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    user                              = query.from_user
+    user                                   = query.from_user
     ok, status, days, is_premium, plan_key = check_access(user.id)
-    free_left                         = get_free_remaining(user.id)
-    daily_rem                         = get_daily_remaining(user.id)
-    user_data                         = get_or_create_user(user.id)
-    total_s                           = user_data.get("total_searches", 0)
-    plan                              = PLANS.get(plan_key, PLANS["trial"])
+    free_left                              = get_free_remaining(user.id)
+    daily_rem                              = get_daily_remaining(user.id)
+    user_data                              = get_or_create_user(user.id)
+    total_s                                = user_data.get("total_searches", 0)
+    plan                                   = PLANS.get(plan_key, PLANS["trial"])
+
+    admin_badge = "\n🛡️ *Role:* Admin" if is_admin(user.id) else ""
 
     if is_premium:
         acc_type   = f"{plan['name']}"
@@ -608,7 +648,8 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"{'━' * 30}\n\n"
         f"🆔 *ID:* `{user.id}`\n"
         f"👤 *Name:* {user.first_name} {user.last_name or ''}\n"
-        f"📛 *Username:* @{user.username or 'N/A'}\n\n"
+        f"📛 *Username:* @{user.username or 'N/A'}\n"
+        f"{admin_badge}\n\n"
         f"{'━' * 30}\n"
         f"       🔐 *Account Info*\n"
         f"{'━' * 30}\n\n"
@@ -623,11 +664,11 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def status_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    user                              = query.from_user
+    user                                   = query.from_user
     ok, status, days, is_premium, plan_key = check_access(user.id)
-    free_left                         = get_free_remaining(user.id)
-    daily_rem                         = get_daily_remaining(user.id)
-    plan                              = PLANS.get(plan_key, PLANS["trial"])
+    free_left                              = get_free_remaining(user.id)
+    daily_rem                              = get_daily_remaining(user.id)
+    plan                                   = PLANS.get(plan_key, PLANS["trial"])
 
     if is_premium:
         if plan.get("unlimited", False):
@@ -681,15 +722,20 @@ async def help_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"   🥈 30 Days → ₹130 → 10/day\n"
         f"   🥇 6 Month → ₹300 → 15/day\n"
         f"   💎 12 Month→ ₹799 → Unlimited\n\n"
-        f"🔍 *Single Search*\n"
-        f"   Example: `919876543210`\n\n"
+        f"🇮🇳 *Indian Number*\n"
+        f"   Sirf 10 digit daalo\n"
+        f"   91 automatic lagega\n"
+        f"   Example: `9876543210`\n\n"
+        f"🌍 *Other Country*\n"
+        f"   Country code + number\n"
+        f"   Example: `14155552671` (US)\n\n"
         f"📦 *Batch Search*\n"
-        f"   Example: `9198...,9197...`\n"
+        f"   Comma se alag karo\n"
         f"   ⚠️ Each number = 1 search\n\n"
         f"{'━' * 30}\n"
         f"💡 *Tips:*\n"
-        f"   • Country code lagao (91)\n"
-        f"   • No spaces or dashes\n"
+        f"   • India: 10 digit only\n"
+        f"   • Other: full number with code\n"
         f"   • Daily limit midnight reset\n"
         f"   • Max 15 batch mein\n"
     )
@@ -726,15 +772,13 @@ async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await safe_edit(query, text, reply_markup=buy_keyboard())
 
 
-# ================== SINGLE SEARCH ==================
+# ================== SINGLE SEARCH - STEP 1: ACCESS CHECK ==================
 async def single_search_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Step 1: Check access then show country selection"""
     query = update.callback_query
     await query.answer()
-    user                              = query.from_user
+    user                                = query.from_user
     ok, status, _, is_premium, plan_key = check_access(user.id)
-    free_left                         = get_free_remaining(user.id)
-    daily_rem                         = get_daily_remaining(user.id)
-    plan                              = PLANS.get(plan_key, PLANS["trial"])
 
     if not ok:
         await safe_edit(
@@ -748,6 +792,11 @@ async def single_search_start(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         return ConversationHandler.END
 
+    # ✅ Show country selection
+    free_left = get_free_remaining(user.id)
+    daily_rem = get_daily_remaining(user.id)
+    plan      = PLANS.get(plan_key, PLANS["trial"])
+
     if is_premium:
         if plan.get("unlimited", False):
             info = "💎 Unlimited searches"
@@ -759,35 +808,154 @@ async def single_search_start(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     await safe_edit(
         query,
-        f"🔍 *Single Search Mode*\n\n"
+        f"🔍 *Single Search*\n\n"
         f"📊 {info}\n\n"
-        f"📱 Phone number daalo:\n"
-        f"_Example: 919876543210_\n\n"
-        f"Type /cancel to go back",
+        f"{'━' * 25}\n"
+        f"📍 *Number kahan ka hai?*\n"
+        f"{'━' * 25}\n\n"
+        f"🇮🇳 *Indian* → Sirf 10 digit daalo\n"
+        f"   _(91 automatic add hoga)_\n\n"
+        f"🌍 *Other Country* → Country code\n"
+        f"   _(Pura number with code)_",
+        reply_markup=country_select_keyboard("single"),
     )
-    return WAITING_SINGLE
+    return WAITING_COUNTRY_SINGLE
 
 
-async def single_search_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    number = update.message.text.strip()
-    user   = update.effective_user
+# ================== SINGLE SEARCH - STEP 2: COUNTRY SELECTED ==================
+async def country_selected_single(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Step 2: Country selected, ask for number"""
+    query = update.callback_query
+    await query.answer()
+    data  = query.data  # country_india_single or country_other_single
 
-    if not number.isdigit():
-        await update.message.reply_text(
-            "❌ Invalid! Sirf numbers.\nTry again or /cancel"
+    if "india" in data:
+        # ✅ Indian number selected
+        context.user_data["search_country"] = "india"
+        await safe_edit(
+            query,
+            f"🇮🇳 *Indian Number Search*\n\n"
+            f"📱 Sirf *10 digit* number daalo:\n"
+            f"_(91 automatic add hoga)_\n\n"
+            f"✅ Example: `9876543210`\n"
+            f"✅ Example: `8123456789`\n\n"
+            f"❌ 91 mat lagao, automatic lagega!\n\n"
+            f"Type /cancel to go back",
         )
-        return WAITING_SINGLE
+        return WAITING_SINGLE_INDIA
 
+    else:
+        # ✅ Other country selected
+        context.user_data["search_country"] = "other"
+        await safe_edit(
+            query,
+            f"🌍 *Other Country Search*\n\n"
+            f"📱 Country code + Number daalo:\n\n"
+            f"✅ *USA:* `14155552671`\n"
+            f"✅ *UK:* `447911123456`\n"
+            f"✅ *UAE:* `971501234567`\n"
+            f"✅ *Pakistan:* `923001234567`\n\n"
+            f"⚠️ *Note:* + mat lagao, sirf numbers\n\n"
+            f"Type /cancel to go back",
+        )
+        return WAITING_SINGLE_OTHER
+
+
+# ================== SINGLE SEARCH - STEP 3A: INDIAN NUMBER ==================
+async def single_india_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Process Indian number - auto add 91"""
+    raw_number = update.message.text.strip()
+    user       = update.effective_user
+
+    # Remove any accidental 91 prefix user might add
+    clean = raw_number.replace(" ", "").replace("-", "").replace("+", "")
+
+    # Validate: must be 10 digits for India
+    if not clean.isdigit():
+        await update.message.reply_text(
+            "❌ *Sirf numbers daalo!*\n\n"
+            "🇮🇳 10 digit Indian number:\n"
+            "Example: `9876543210`\n\n"
+            "Try again ya /cancel",
+            parse_mode="Markdown"
+        )
+        return WAITING_SINGLE_INDIA
+
+    # Remove 91 if user added it
+    if clean.startswith("91") and len(clean) == 12:
+        clean = clean[2:]
+
+    if len(clean) != 10:
+        await update.message.reply_text(
+            "❌ *Indian number 10 digit ka hona chahiye!*\n\n"
+            "Example: `9876543210`\n\n"
+            "Try again ya /cancel",
+            parse_mode="Markdown"
+        )
+        return WAITING_SINGLE_INDIA
+
+    # ✅ Auto add 91
+    final_number = f"91{clean}"
+
+    await _do_single_search(update, context, final_number, f"🇮🇳 {final_number}")
+    return ConversationHandler.END
+
+
+# ================== SINGLE SEARCH - STEP 3B: OTHER COUNTRY NUMBER ==================
+async def single_other_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Process other country number"""
+    raw_number = update.message.text.strip()
+    user       = update.effective_user
+
+    clean = raw_number.replace(" ", "").replace("-", "").replace("+", "")
+
+    if not clean.isdigit():
+        await update.message.reply_text(
+            "❌ *Sirf numbers daalo!*\n\n"
+            "🌍 Country code + number:\n"
+            "Example: `14155552671` (US)\n\n"
+            "Try again ya /cancel",
+            parse_mode="Markdown"
+        )
+        return WAITING_SINGLE_OTHER
+
+    if len(clean) < 7 or len(clean) > 15:
+        await update.message.reply_text(
+            "❌ *Number bahut chota ya bada hai!*\n\n"
+            "Country code + number (7-15 digits)\n"
+            "Example: `14155552671`\n\n"
+            "Try again ya /cancel",
+            parse_mode="Markdown"
+        )
+        return WAITING_SINGLE_OTHER
+
+    await _do_single_search(update, context, clean, f"🌍 {clean}")
+    return ConversationHandler.END
+
+
+# ================== SINGLE SEARCH - CORE LOGIC ==================
+async def _do_single_search(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    number: str,
+    display: str
+):
+    """Common search logic for both indian and other"""
+    user = update.effective_user
     ok, status, _, is_premium, plan_key = check_access(user.id)
+
     if not ok:
         await update.message.reply_text(
             f"🔒 *Locked!*\n{status}\n💰 {OWNER_CONTACT}",
             reply_markup=buy_keyboard(),
             parse_mode="Markdown"
         )
-        return ConversationHandler.END
+        return
 
-    msg    = await update.message.reply_text("🔍 Searching...")
+    msg    = await update.message.reply_text(
+        f"🔍 Searching `{display}`...",
+        parse_mode="Markdown"
+    )
     result = search_api(number)
 
     if result["ok"]:
@@ -795,7 +963,7 @@ async def single_search_process(update: Update, context: ContextTypes.DEFAULT_TY
         free_left = get_free_remaining(user.id)
         daily_rem = get_daily_remaining(user.id)
         plan      = PLANS.get(plan_key, PLANS["trial"])
-        text      = format_result(number, result["data"])
+        text      = format_result(display, result["data"])
 
         if is_premium and not plan.get("unlimited", False):
             daily_limit = plan.get("daily_limit", 0)
@@ -820,18 +988,15 @@ async def single_search_process(update: Update, context: ContextTypes.DEFAULT_TY
             reply_markup=back_keyboard(user.id),
             parse_mode="Markdown",
         )
-    return ConversationHandler.END
 
 
-# ================== BATCH SEARCH ==================
+# ================== BATCH SEARCH - STEP 1: ACCESS CHECK ==================
 async def batch_search_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Step 1: Check access then show country selection"""
     query = update.callback_query
     await query.answer()
-    user                              = query.from_user
+    user                                = query.from_user
     ok, status, _, is_premium, plan_key = check_access(user.id)
-    free_left                         = get_free_remaining(user.id)
-    daily_rem                         = get_daily_remaining(user.id)
-    plan                              = PLANS.get(plan_key, PLANS["trial"])
 
     if not ok:
         await safe_edit(
@@ -841,6 +1006,10 @@ async def batch_search_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
             reply_markup=buy_keyboard(),
         )
         return ConversationHandler.END
+
+    free_left = get_free_remaining(user.id)
+    daily_rem = get_daily_remaining(user.id)
+    plan      = PLANS.get(plan_key, PLANS["trial"])
 
     if is_premium:
         if plan.get("unlimited", False):
@@ -853,31 +1022,157 @@ async def batch_search_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     await safe_edit(
         query,
-        f"📦 *Batch Search Mode*\n\n"
+        f"📦 *Batch Search*\n\n"
         f"📊 {info}\n\n"
-        f"📱 Numbers daalo (comma se alag):\n"
-        f"_Example: 9198...,9197...,9196..._\n"
-        f"_Max 15 ek baar mein_\n\n"
-        f"Type /cancel to go back",
+        f"{'━' * 25}\n"
+        f"📍 *Numbers kahan ke hain?*\n"
+        f"{'━' * 25}\n\n"
+        f"🇮🇳 *Indian* → Sirf 10 digit\n"
+        f"   _(91 automatic add hoga)_\n\n"
+        f"🌍 *Other Country* → Country code\n"
+        f"   _(Pura number with code)_",
+        reply_markup=country_select_keyboard("batch"),
     )
-    return WAITING_BATCH
+    return WAITING_COUNTRY_BATCH
 
 
-async def batch_search_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    raw     = update.message.text.strip()
-    user    = update.effective_user
-    numbers = [n.strip() for n in raw.replace(",", " ").split() if n.strip()]
+# ================== BATCH SEARCH - STEP 2: COUNTRY SELECTED ==================
+async def country_selected_batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Step 2: Country selected for batch"""
+    query = update.callback_query
+    await query.answer()
+    data  = query.data  # country_india_batch or country_other_batch
 
-    if not numbers:
-        await update.message.reply_text("❌ Koi number nahi! Try again or /cancel")
-        return WAITING_BATCH
+    if "india" in data:
+        context.user_data["batch_country"] = "india"
+        await safe_edit(
+            query,
+            f"🇮🇳 *Indian Batch Search*\n\n"
+            f"📱 10 digit numbers comma se alag karo:\n"
+            f"_(91 automatic add hoga)_\n\n"
+            f"✅ *Example:*\n"
+            f"`9876543210,8123456789,7001234567`\n\n"
+            f"⚠️ Max 15 numbers\n"
+            f"❌ 91 mat lagao!\n\n"
+            f"Type /cancel to go back",
+        )
+        return WAITING_BATCH_INDIA
 
-    numbers                           = numbers[:15]
-    total                             = len(numbers)
-    ok, status, _, is_premium, plan_key = check_access(user.id)
-    free_left                         = get_free_remaining(user.id)
-    daily_rem                         = get_daily_remaining(user.id)
-    plan                              = PLANS.get(plan_key, PLANS["trial"])
+    else:
+        context.user_data["batch_country"] = "other"
+        await safe_edit(
+            query,
+            f"🌍 *Other Country Batch Search*\n\n"
+            f"📱 Country code + number, comma se alag:\n\n"
+            f"✅ *Example:*\n"
+            f"`14155552671,447911123456,971501234567`\n\n"
+            f"⚠️ Max 15 numbers\n"
+            f"⚠️ + mat lagao\n\n"
+            f"Type /cancel to go back",
+        )
+        return WAITING_BATCH_OTHER
+
+
+# ================== BATCH SEARCH - STEP 3A: INDIAN BATCH ==================
+async def batch_india_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Process Indian batch - auto add 91 to each"""
+    raw  = update.message.text.strip()
+    user = update.effective_user
+
+    raw_numbers = [n.strip().replace(" ", "").replace("-", "").replace("+", "")
+                   for n in raw.split(",") if n.strip()]
+
+    valid_numbers   = []
+    invalid_numbers = []
+
+    for num in raw_numbers:
+        # Remove accidental 91 prefix
+        if num.startswith("91") and len(num) == 12:
+            num = num[2:]
+        if num.isdigit() and len(num) == 10:
+            full = f"91{num}"
+            if full not in valid_numbers:
+                valid_numbers.append(full)
+        else:
+            invalid_numbers.append(num)
+
+    if not valid_numbers:
+        await update.message.reply_text(
+            "❌ *Koi valid Indian number nahi mila!*\n\n"
+            "10 digit numbers daalo:\n"
+            "`9876543210,8123456789`\n\n"
+            "Try again ya /cancel",
+            parse_mode="Markdown"
+        )
+        return WAITING_BATCH_INDIA
+
+    warning = ""
+    if invalid_numbers:
+        warning = (
+            f"\n⚠️ *Skip kiye ({len(invalid_numbers)}):*\n"
+            f"`{', '.join(invalid_numbers[:5])}`\n"
+            f"_(Invalid ya wrong length)_\n"
+        )
+
+    await _do_batch_search(update, context, valid_numbers[:15], "india", warning)
+    return ConversationHandler.END
+
+
+# ================== BATCH SEARCH - STEP 3B: OTHER COUNTRY BATCH ==================
+async def batch_other_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Process other country batch"""
+    raw  = update.message.text.strip()
+    user = update.effective_user
+
+    raw_numbers = [n.strip().replace(" ", "").replace("-", "").replace("+", "")
+                   for n in raw.split(",") if n.strip()]
+
+    valid_numbers   = []
+    invalid_numbers = []
+
+    for num in raw_numbers:
+        if num.isdigit() and 7 <= len(num) <= 15:
+            if num not in valid_numbers:
+                valid_numbers.append(num)
+        else:
+            invalid_numbers.append(num)
+
+    if not valid_numbers:
+        await update.message.reply_text(
+            "❌ *Koi valid number nahi mila!*\n\n"
+            "Country code + number:\n"
+            "`14155552671,447911123456`\n\n"
+            "Try again ya /cancel",
+            parse_mode="Markdown"
+        )
+        return WAITING_BATCH_OTHER
+
+    warning = ""
+    if invalid_numbers:
+        warning = (
+            f"\n⚠️ *Skip kiye ({len(invalid_numbers)}):*\n"
+            f"`{', '.join(invalid_numbers[:5])}`\n"
+        )
+
+    await _do_batch_search(update, context, valid_numbers[:15], "other", warning)
+    return ConversationHandler.END
+
+
+# ================== BATCH SEARCH - CORE LOGIC ==================
+async def _do_batch_search(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    numbers: list,
+    country: str,
+    warning: str = ""
+):
+    """Common batch search logic"""
+    user                                   = update.effective_user
+    ok, status, _, is_premium, plan_key    = check_access(user.id)
+    free_left                              = get_free_remaining(user.id)
+    daily_rem                              = get_daily_remaining(user.id)
+    plan                                   = PLANS.get(plan_key, PLANS["trial"])
+    total                                  = len(numbers)
 
     available = 999999 if plan.get("unlimited", False) else (
         daily_rem if is_premium else free_left
@@ -886,36 +1181,42 @@ async def batch_search_process(update: Update, context: ContextTypes.DEFAULT_TYP
     if total > available:
         await update.message.reply_text(
             f"❌ *Searches kam hain!*\n\n"
-            f"Aapne daala: *{total}* numbers\n"
-            f"Available: *{available}* searches\n\n"
+            f"Numbers: *{total}*\n"
+            f"Available: *{available}*\n\n"
             f"💡 Max *{available}* numbers dalein\n"
-            f"Ya premium lo unlimited ke liye\n"
             f"👉 {OWNER_CONTACT}",
             reply_markup=buy_keyboard(),
             parse_mode="Markdown"
         )
-        return ConversationHandler.END
+        return
+
+    flag = "🇮🇳" if country == "india" else "🌍"
+
+    # Show warning if any skipped
+    if warning:
+        await update.message.reply_text(warning, parse_mode="Markdown")
 
     msg = await update.message.reply_text(
-        f"🚀 Processing {total} numbers...\n[{'░' * total}]"
+        f"{flag} Processing {total} numbers...\n[{'░' * total}]"
     )
 
     for i, num in enumerate(numbers, 1):
         result   = search_api(num)
         progress = "█" * i + "░" * (total - i)
+        display  = f"🇮🇳 {num}" if country == "india" else f"🌍 {num}"
 
         if result["ok"]:
             use_one_search(user.id)
-            text = format_result(num, result["data"])
+            text = format_result(display, result["data"])
             await update.message.reply_text(text, parse_mode="Markdown")
         else:
             await update.message.reply_text(
-                f"❌ *{num}*\n`{result['error']}`",
+                f"❌ *{display}*\n`{result['error']}`",
                 parse_mode="Markdown"
             )
         try:
             await msg.edit_text(
-                f"🚀 Processing... ({i}/{total})\n[{progress}]"
+                f"{flag} Processing... ({i}/{total})\n[{progress}]"
             )
         except:
             pass
@@ -935,28 +1236,30 @@ async def batch_search_process(update: Update, context: ContextTypes.DEFAULT_TYP
         reply_markup=main_menu_keyboard(user.id),
         parse_mode="Markdown",
     )
-    return ConversationHandler.END
 
 
 # ================== CANCEL ==================
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    context.user_data.clear()
     await update.message.reply_text(
         "❌ Cancelled.",
         reply_markup=main_menu_keyboard(user.id)
     )
     return ConversationHandler.END
-    # ================== ADMIN ==================
+
+
+# ================== ADMIN ==================
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
+    if not is_admin(update.effective_user.id):
         if update.message:
             await update.message.reply_text("❌ Admin only!")
         return ConversationHandler.END
 
-    users    = load_users()
-    total    = len(users)
-    premium  = sum(1 for u in users.values() if u.get("is_premium", False))
-    free_u   = total - premium
+    users   = load_users()
+    total   = len(users)
+    premium = sum(1 for u in users.values() if u.get("is_premium", False))
+    free_u  = total - premium
 
     text = (
         f"{'━' * 30}\n"
@@ -982,8 +1285,8 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def admin_add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    if query.from_user.id != ADMIN_ID:
-        await query.answer("❌")
+    if not is_admin(query.from_user.id):
+        await query.answer("❌ Admin only!")
         return ConversationHandler.END
     await query.answer()
     await safe_edit(
@@ -1018,9 +1321,9 @@ async def admin_add_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
     plan_map = {
-        "addplan_7days"  : "7days",
-        "addplan_30days" : "30days",
-        "addplan_6months": "6months",
+        "addplan_7days"   : "7days",
+        "addplan_30days"  : "30days",
+        "addplan_6months" : "6months",
         "addplan_12months": "12months",
     }
 
@@ -1045,8 +1348,8 @@ async def admin_add_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def admin_remove_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    if query.from_user.id != ADMIN_ID:
-        await query.answer("❌")
+    if not is_admin(query.from_user.id):
+        await query.answer("❌ Admin only!")
         return ConversationHandler.END
     await query.answer()
     await safe_edit(
@@ -1080,8 +1383,8 @@ async def admin_remove_process(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def admin_expiry_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    if query.from_user.id != ADMIN_ID:
-        await query.answer("❌")
+    if not is_admin(query.from_user.id):
+        await query.answer("❌ Admin only!")
         return ConversationHandler.END
     await query.answer()
     await safe_edit(
@@ -1140,17 +1443,14 @@ async def admin_expiry_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def admin_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    if query.from_user.id != ADMIN_ID:
-        await query.answer("❌")
+    if not is_admin(query.from_user.id):
+        await query.answer("❌ Admin only!")
         return
     await query.answer()
     users = load_users()
 
     if not users:
-        await safe_edit(
-            query, "📋 *No users yet!*",
-            reply_markup=admin_menu_keyboard()
-        )
+        await safe_edit(query, "📋 *No users yet!*", reply_markup=admin_menu_keyboard())
         return
 
     text = f"{'━' * 30}\n📋 *All Users ({len(users)})*\n{'━' * 30}\n\n"
@@ -1178,15 +1478,16 @@ async def admin_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
             s      = f"🆓 {left}/{FREE_SEARCHES} trial"
 
         plan_emoji = plan.get("name", "🆓 Trial").split()[0]
-        text += f"{plan_emoji} `{uid}` | {s} | 🔍{total_s}\n"
+        admin_mark = " 🛡️" if int(uid) in ADMIN_IDS else ""
+        text += f"{plan_emoji} `{uid}`{admin_mark} | {s} | 🔍{total_s}\n"
 
     await safe_edit(query, text[:4000], reply_markup=admin_menu_keyboard())
 
 
 async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    if query.from_user.id != ADMIN_ID:
-        await query.answer("❌")
+    if not is_admin(query.from_user.id):
+        await query.answer("❌ Admin only!")
         return
     await query.answer()
     users = load_users()
@@ -1229,6 +1530,7 @@ async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🥇 6 Months  : {plan_counts.get('6months', 0)}\n"
         f"💎 12 Months : {plan_counts.get('12months', 0)}\n"
         f"🔴 Expired   : {expired}\n\n"
+        f"🛡️ *Admins*        : {len(ADMIN_IDS)}\n"
         f"📅 Date: {date.today()}\n"
     )
     await safe_edit(query, text, reply_markup=admin_menu_keyboard())
@@ -1262,34 +1564,48 @@ def main():
         .build()
     )
 
+    # ✅ Single Search Conversation - now with country selection
     search_conv = ConversationHandler(
         entry_points=[
             CallbackQueryHandler(single_search_start, pattern="^single$")
         ],
         states={
-            WAITING_SINGLE: [
-                MessageHandler(
-                    filters.TEXT & ~filters.COMMAND,
-                    single_search_process
+            WAITING_COUNTRY_SINGLE: [
+                CallbackQueryHandler(
+                    country_selected_single,
+                    pattern="^country_(india|other)_single$"
                 )
-            ]
+            ],
+            WAITING_SINGLE_INDIA: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, single_india_process)
+            ],
+            WAITING_SINGLE_OTHER: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, single_other_process)
+            ],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
         per_message=False,
         allow_reentry=True,
     )
 
+    # ✅ Batch Search Conversation - now with country selection
     batch_conv = ConversationHandler(
         entry_points=[
             CallbackQueryHandler(batch_search_start, pattern="^batch$")
         ],
         states={
-            WAITING_BATCH: [
-                MessageHandler(
-                    filters.TEXT & ~filters.COMMAND,
-                    batch_search_process
+            WAITING_COUNTRY_BATCH: [
+                CallbackQueryHandler(
+                    country_selected_batch,
+                    pattern="^country_(india|other)_batch$"
                 )
-            ]
+            ],
+            WAITING_BATCH_INDIA: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, batch_india_process)
+            ],
+            WAITING_BATCH_OTHER: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, batch_other_process)
+            ],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
         per_message=False,
@@ -1302,15 +1618,11 @@ def main():
         ],
         states={
             ADMIN_ADD_ID: [
-                MessageHandler(
-                    filters.TEXT & ~filters.COMMAND,
-                    admin_add_id
-                )
+                MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_id)
             ],
             ADMIN_ADD_PLAN: [
                 CallbackQueryHandler(
-                    admin_add_plan,
-                    pattern="^addplan_|^admin_cancel$"
+                    admin_add_plan, pattern="^addplan_|^admin_cancel$"
                 )
             ],
         },
@@ -1325,10 +1637,7 @@ def main():
         ],
         states={
             ADMIN_REM_ID: [
-                MessageHandler(
-                    filters.TEXT & ~filters.COMMAND,
-                    admin_remove_process
-                )
+                MessageHandler(filters.TEXT & ~filters.COMMAND, admin_remove_process)
             ]
         },
         fallbacks=[CommandHandler("cancel", cancel)],
@@ -1342,15 +1651,11 @@ def main():
         ],
         states={
             ADMIN_EXP_ID: [
-                MessageHandler(
-                    filters.TEXT & ~filters.COMMAND,
-                    admin_expiry_id
-                )
+                MessageHandler(filters.TEXT & ~filters.COMMAND, admin_expiry_id)
             ],
             ADMIN_EXP_PLAN: [
                 CallbackQueryHandler(
-                    admin_expiry_set,
-                    pattern="^setplan_|^admin_cancel$"
+                    admin_expiry_set, pattern="^setplan_|^admin_cancel$"
                 )
             ],
         },
@@ -1365,8 +1670,8 @@ def main():
     app.add_handler(admin_remove_conv)
     app.add_handler(admin_expiry_conv)
 
-    app.add_handler(CommandHandler("start",  start))
-    app.add_handler(CommandHandler("admin",  admin_panel))
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("admin", admin_panel))
 
     app.add_handler(CallbackQueryHandler(profile,            pattern="^profile$"))
     app.add_handler(CallbackQueryHandler(status_check,       pattern="^status$"))
@@ -1377,9 +1682,9 @@ def main():
     app.add_handler(CallbackQueryHandler(main_menu_callback, pattern="^main_menu$"))
 
     print("🤖 Bot is running...")
-    print(f"👤 Admin ID      : {ADMIN_ID}")
-    print(f"🔑 PIN           : {DEFAULT_PIN}")
-    print(f"🆓 Free Searches : {FREE_SEARCHES}")
+    print(f"🛡️  Admins         : {ADMIN_IDS}")
+    print(f"🔑 PIN             : {DEFAULT_PIN}")
+    print(f"🆓 Free Searches   : {FREE_SEARCHES}")
     print("📦 Plans:")
     for k, v in PLANS.items():
         if not v["is_free"]:
