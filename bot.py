@@ -25,8 +25,8 @@ DATA_FILE     = Path("users.json")
 OWNER_CONTACT = "@theplayerror"
 
 # ================== FREE SEARCHES ==================
-PHONE_FREE_SEARCHES = 1
-EMAIL_FREE_SEARCHES = 3
+PHONE_FREE_SEARCHES = 2
+EMAIL_FREE_SEARCHES = 2
 
 # ================== PLANS ==================
 PLANS = {
