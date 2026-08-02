@@ -29,13 +29,12 @@ PHONE_FREE_SEARCHES = 1
 EMAIL_FREE_SEARCHES = 3
 
 # ================== PLANS ==================
-# ✅ EK PLAN = DONO ACCESS (Phone + Email)
 PLANS = {
     "trial": {
         "name"       : "Trial",
         "days"       : 0,
         "price"      : 0,
-        "daily_limit": 0,   # phone daily limit
+        "daily_limit": 0,
         "unlimited"  : False,
         "is_free"    : True,
     },
@@ -43,7 +42,7 @@ PLANS = {
         "name"       : "7 Days",
         "days"       : 7,
         "price"      : 50,
-        "daily_limit": 5,   # phone: 5/day, email: unlimited
+        "daily_limit": 5,
         "unlimited"  : False,
         "is_free"    : False,
     },
@@ -111,19 +110,15 @@ def get_or_create_user(user_id: int):
     uid   = str(user_id)
     if uid not in users:
         users[uid] = {
-            # ✅ Single plan for both phone + email
             "plan"                : "trial",
             "expiry"              : "",
             "is_premium"          : False,
-            # Phone
             "phone_free_used"     : 0,
             "phone_daily_searches": 0,
             "phone_last_date"     : "",
             "phone_total"         : 0,
-            # Email
             "email_free_used"     : 0,
             "email_total"         : 0,
-            # Common
             "added"               : date.today().isoformat(),
             "total_searches"      : 0,
         }
@@ -131,17 +126,13 @@ def get_or_create_user(user_id: int):
     return users[uid]
 
 
-# ================== PLAN UPGRADE (DONO ACCESS) ==================
+# ================== PLAN UPGRADE ==================
 def upgrade_user(user_id: int, plan_key: str):
-    """
-    ✅ Ek plan se dono Phone + Email access milta hai
-    """
     users     = load_users()
     uid       = str(user_id)
     user_data = get_or_create_user(user_id)
     plan      = PLANS.get(plan_key, PLANS["7days"])
     expiry    = (date.today() + timedelta(days=plan["days"])).isoformat()
-
     user_data["plan"]                 = plan_key
     user_data["expiry"]               = expiry
     user_data["is_premium"]           = True
@@ -199,10 +190,8 @@ def use_phone_search(user_id: int):
     save_users(users)
 
 def check_phone_access(user_id: int):
-    # ✅ Admin = unlimited
     if is_admin(user_id):
         return True, "Admin Unlimited", 9999, True, "12months"
-
     get_or_create_user(user_id)
     users      = load_users()
     uid        = str(user_id)
@@ -211,22 +200,18 @@ def check_phone_access(user_id: int):
     plan       = PLANS.get(plan_key, PLANS["trial"])
     expiry_str = user_data.get("expiry", "")
     is_premium = user_data.get("is_premium", False)
-
     if is_premium and expiry_str:
         try:
             expiry = date.fromisoformat(expiry_str)
             if date.today() > expiry:
-                # Plan expired - check free searches
                 free_left = get_phone_free_remaining(user_id)
                 if free_left > 0:
                     return True, "Plan expired | " + str(free_left) + " free left", 0, False, "trial"
                 return False, "Plan expired! Renew karo.", 0, False, "trial"
-
             days_left    = (expiry - date.today()).days
             daily_rem    = get_phone_daily_remaining(user_id)
             daily_limit  = plan.get("daily_limit", 0)
             is_unlimited = plan.get("unlimited", False)
-
             if is_unlimited:
                 return True, plan["name"] + " | Unlimited | " + str(days_left) + "d left", days_left, True, plan_key
             else:
@@ -235,7 +220,6 @@ def check_phone_access(user_id: int):
                 return True, plan["name"] + " | " + str(daily_rem) + "/" + str(daily_limit) + " today | " + str(days_left) + "d left", days_left, True, plan_key
         except Exception:
             pass
-
     free_left = get_phone_free_remaining(user_id)
     if free_left > 0:
         return True, "Trial (" + str(free_left) + "/" + str(PHONE_FREE_SEARCHES) + " left)", 0, False, "trial"
@@ -263,18 +247,14 @@ def use_email_search(user_id: int, is_premium: bool):
     save_users(users)
 
 def check_email_access(user_id: int):
-    # ✅ Admin = unlimited
     if is_admin(user_id):
         return True, "Admin Unlimited", 9999, True
-
     get_or_create_user(user_id)
     users      = load_users()
     uid        = str(user_id)
     user_data  = users[uid]
     is_premium = user_data.get("is_premium", False)
     expiry_str = user_data.get("expiry", "")
-
-    # ✅ Same plan = email bhi premium
     if is_premium and expiry_str:
         try:
             expiry = date.fromisoformat(expiry_str)
@@ -287,7 +267,6 @@ def check_email_access(user_id: int):
             return True, "Premium (" + str(days) + " days left)", days, True
         except Exception:
             pass
-
     free_left = get_email_free_remaining(user_id)
     if free_left > 0:
         return True, "Free (" + str(free_left) + "/" + str(EMAIL_FREE_SEARCHES) + " left)", 0, False
@@ -524,7 +503,6 @@ def phone_menu_keyboard(user_id: int):
         else:
             single_label = "🔍 Single (🔒)"
             batch_label  = "📦 Batch (🔒)"
-
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton(single_label, callback_data="phone_single"),
@@ -549,7 +527,6 @@ def email_menu_keyboard(user_id: int):
         else:
             single_label = "🔍 Single (🔒)"
             batch_label  = "📦 Batch (🔒)"
-
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton(single_label, callback_data="email_single"),
@@ -568,22 +545,31 @@ def country_select_keyboard(mode: str):
 def admin_menu_keyboard():
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("➕ Add User",    callback_data="admin_add"),
-            InlineKeyboardButton("❌ Remove User", callback_data="admin_remove"),
+            InlineKeyboardButton("➕ Add User",      callback_data="admin_add"),
+            InlineKeyboardButton("❌ Remove User",   callback_data="admin_remove"),
         ],
         [
-            InlineKeyboardButton("📅 Set Plan",   callback_data="admin_setplan"),
-            InlineKeyboardButton("📋 All Users",  callback_data="admin_list"),
+            InlineKeyboardButton("📅 Set Plan",     callback_data="admin_setplan"),
+            InlineKeyboardButton("📋 All Users",    callback_data="admin_list"),
         ],
         [
-            InlineKeyboardButton("📊 Stats",      callback_data="admin_stats"),
-            InlineKeyboardButton("🔙 Main Menu",  callback_data="main_menu"),
+            InlineKeyboardButton("📊 Stats",        callback_data="admin_stats"),
+            # ✅ New Button - Free/Trial Monitor
+            InlineKeyboardButton("🆓 Free Monitor", callback_data="admin_free_monitor"),
+        ],
+        [
+            InlineKeyboardButton("🔙 Main Menu",    callback_data="main_menu"),
         ],
     ])
 
 def back_keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🔙 Main Menu", callback_data="main_menu")]
+    ])
+
+def admin_back_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔙 Admin Menu", callback_data="admin_back")]
     ])
 
 def buy_keyboard():
@@ -606,6 +592,23 @@ def plan_select_keyboard(prefix: str):
             InlineKeyboardButton("💎 12 Months - Rs799", callback_data=prefix + "_12months"),
         ],
         [InlineKeyboardButton("❌ Cancel", callback_data="admin_back")],
+    ])
+
+# ✅ Free Monitor Sub-Menu Keyboard
+def free_monitor_keyboard():
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📱 Phone Trial Users",  callback_data="monitor_phone"),
+            InlineKeyboardButton("📧 Email Free Users",   callback_data="monitor_email"),
+        ],
+        [
+            InlineKeyboardButton("🔴 All Exhausted",      callback_data="monitor_exhausted"),
+            InlineKeyboardButton("🟢 Still Has Searches", callback_data="monitor_active"),
+        ],
+        [
+            InlineKeyboardButton("📊 Full Summary",       callback_data="monitor_summary"),
+        ],
+        [InlineKeyboardButton("🔙 Admin Menu", callback_data="admin_back")],
     ])
 
 
@@ -656,9 +659,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         expiry    = user_data.get("expiry", "")
         plan_key  = user_data.get("plan", "trial")
         plan      = PLANS.get(plan_key, PLANS["trial"])
-
-        p_free = get_phone_free_remaining(user.id)
-        e_free = get_email_free_remaining(user.id)
+        p_free    = get_phone_free_remaining(user.id)
+        e_free    = get_email_free_remaining(user.id)
 
         if is_prem and expiry:
             try:
@@ -697,7 +699,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             d2 + "\n"
             "📧 *Email Search*\n" +
             d2 + "\n" +
-            e_line + "\n\n" +
+            e_line + "\n\n"
             "💡 *Ek plan se dono access milta hai!*\n\n" +
             d1 + "\n\n"
             "Choose search type below 👇"
@@ -722,7 +724,6 @@ async def mode_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user  = query.from_user
-
     if is_admin(user.id):
         info = "🛡️ Admin — Unlimited"
     else:
@@ -737,7 +738,6 @@ async def mode_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 info = "✅ " + str(daily_rem) + "/" + str(plan.get("daily_limit", 0)) + " today"
         else:
             info = "🆓 " + str(free_left) + "/" + str(PHONE_FREE_SEARCHES) + " trial"
-
     d1   = "\u2501" * 30
     text = (
         d1 + "\n"
@@ -752,7 +752,6 @@ async def mode_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user  = query.from_user
-
     if is_admin(user.id):
         info = "🛡️ Admin — Unlimited"
     else:
@@ -762,7 +761,6 @@ async def mode_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
             info = "💎 Premium | " + str(days) + "d left"
         else:
             info = "🆓 " + str(free_left) + "/" + str(EMAIL_FREE_SEARCHES) + " free"
-
     d1   = "\u2501" * 30
     text = (
         d1 + "\n"
@@ -818,16 +816,14 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
             exp_date  = date.fromisoformat(expiry)
             days_left = (exp_date - date.today()).days
             if days_left >= 0:
-                bar_len  = 20
-                filled   = min(int((days_left / max(plan["days"], 1)) * bar_len), bar_len)
-                bar      = make_bar(filled, bar_len)
+                bar_len   = 20
+                filled    = min(int((days_left / max(plan["days"], 1)) * bar_len), bar_len)
+                bar       = make_bar(filled, bar_len)
                 daily_rem = get_phone_daily_remaining(user.id)
-
                 if plan.get("unlimited", False):
                     p_info = "💎 " + plan["name"] + " | Unlimited"
                 else:
                     p_info = "💎 " + plan["name"] + " | " + str(daily_rem) + "/" + str(plan.get("daily_limit", 0)) + " today"
-
                 plan_info = (
                     "📦 *Plan:* " + plan["name"] + "\n"
                     "📅 *Expiry:* " + expiry + "\n"
@@ -1292,7 +1288,6 @@ async def _do_phone_batch(update, context, numbers, country, warning=""):
             await msg.edit_text(flag + " Processing... (" + str(i) + "/" + str(total) + ")\n[" + progress + "]")
         except Exception:
             pass
-    divider = "\u2501" * 25
     if is_admin(user.id):
         summary = "✅ *Batch Done!*\n📊 Processed: " + str(total) + "\n🛡️ Admin Search"
     elif is_premium and not plan.get("unlimited", False):
@@ -1635,7 +1630,7 @@ async def admin_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         total_s = info.get("total_searches", 0)
         expiry  = info.get("expiry", "")
         if int(uid) in ADMIN_IDS:
-            badge = " 🛡️"
+            badge  = " 🛡️"
             status = "∞ Admin"
         elif is_prem and expiry:
             try:
@@ -1708,6 +1703,361 @@ async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📅 " + str(date.today()) + "\n"
     )
     await safe_edit(query, text, reply_markup=admin_menu_keyboard())
+
+
+# ==================== ✅ FREE MONITOR ====================
+async def admin_free_monitor(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Main free monitor menu"""
+    query = update.callback_query
+    if not is_admin(query.from_user.id):
+        await query.answer("❌")
+        return
+    await query.answer()
+
+    users = load_users()
+    # Count free/trial users only (not premium, not admin)
+    free_users = [
+        (uid, info) for uid, info in users.items()
+        if not info.get("is_premium", False) and int(uid) not in ADMIN_IDS
+    ]
+
+    p_has    = sum(1 for _, i in free_users if i.get("phone_free_used", 0) < PHONE_FREE_SEARCHES)
+    p_done   = sum(1 for _, i in free_users if i.get("phone_free_used", 0) >= PHONE_FREE_SEARCHES)
+    e_has    = sum(1 for _, i in free_users if i.get("email_free_used", 0) < EMAIL_FREE_SEARCHES)
+    e_done   = sum(1 for _, i in free_users if i.get("email_free_used", 0) >= EMAIL_FREE_SEARCHES)
+
+    d1  = "\u2501" * 30
+    d2  = "\u2501" * 25
+    text = (
+        d1 + "\n"
+        "   🆓 *Free / Trial Monitor*\n" +
+        d1 + "\n\n"
+        "👥 Total Free Users: " + str(len(free_users)) + "\n\n" +
+        d2 + "\n"
+        "📱 *Phone Trial Status*\n" +
+        d2 + "\n"
+        "🟢 Has searches  : " + str(p_has) + "\n"
+        "🔴 All used up   : " + str(p_done) + "\n\n" +
+        d2 + "\n"
+        "📧 *Email Free Status*\n" +
+        d2 + "\n"
+        "🟢 Has searches  : " + str(e_has) + "\n"
+        "🔴 All used up   : " + str(e_done) + "\n\n"
+        "Choose filter below 👇"
+    )
+    await safe_edit(query, text, reply_markup=free_monitor_keyboard())
+
+
+async def monitor_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show all phone trial users with details"""
+    query = update.callback_query
+    if not is_admin(query.from_user.id):
+        await query.answer("❌")
+        return
+    await query.answer()
+
+    users      = load_users()
+    d1         = "\u2501" * 30
+    text       = d1 + "\n📱 *Phone Trial Users*\n" + d1 + "\n\n"
+    text      += "Format: ID | Used/Total | Searches\n\n"
+
+    count = 0
+    for uid, info in users.items():
+        if int(uid) in ADMIN_IDS:
+            continue
+        if info.get("is_premium", False):
+            continue
+
+        p_used  = info.get("phone_free_used", 0)
+        p_left  = max(0, PHONE_FREE_SEARCHES - p_used)
+        total_s = info.get("total_searches", 0)
+        added   = info.get("added", "N/A")
+
+        if p_left > 0:
+            icon = "🟢"
+        else:
+            icon = "🔴"
+
+        # Progress bar
+        bar = "🟢" * p_left + "🔴" * p_used
+
+        text += (
+            icon + " `" + str(uid) + "`\n"
+            "   📱 Phone: " + bar + " (" + str(p_left) + "/" + str(PHONE_FREE_SEARCHES) + " left)\n"
+            "   🔍 Total Searches: " + str(total_s) + "\n"
+            "   📅 Joined: " + str(added) + "\n\n"
+        )
+        count += 1
+
+    if count == 0:
+        text += "_No trial users found_\n"
+
+    text += d1 + "\nTotal: " + str(count) + " users"
+
+    # Split if too long
+    if len(text) > 4000:
+        text = text[:3900] + "\n\n_...aur bhi hain (4000 char limit)_"
+
+    await safe_edit(query, text, reply_markup=free_monitor_keyboard())
+
+
+async def monitor_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show all email free users with details"""
+    query = update.callback_query
+    if not is_admin(query.from_user.id):
+        await query.answer("❌")
+        return
+    await query.answer()
+
+    users = load_users()
+    d1    = "\u2501" * 30
+    text  = d1 + "\n📧 *Email Free Users*\n" + d1 + "\n\n"
+
+    count = 0
+    for uid, info in users.items():
+        if int(uid) in ADMIN_IDS:
+            continue
+        if info.get("is_premium", False):
+            continue
+
+        e_used  = info.get("email_free_used", 0)
+        e_left  = max(0, EMAIL_FREE_SEARCHES - e_used)
+        total_s = info.get("total_searches", 0)
+        added   = info.get("added", "N/A")
+
+        if e_left > 0:
+            icon = "🟢"
+        else:
+            icon = "🔴"
+
+        bar = "🟢" * e_left + "🔴" * e_used
+
+        text += (
+            icon + " `" + str(uid) + "`\n"
+            "   📧 Email: " + bar + " (" + str(e_left) + "/" + str(EMAIL_FREE_SEARCHES) + " left)\n"
+            "   🔍 Total Searches: " + str(total_s) + "\n"
+            "   📅 Joined: " + str(added) + "\n\n"
+        )
+        count += 1
+
+    if count == 0:
+        text += "_No free email users found_\n"
+
+    text += d1 + "\nTotal: " + str(count) + " users"
+
+    if len(text) > 4000:
+        text = text[:3900] + "\n\n_...aur bhi hain (4000 char limit)_"
+
+    await safe_edit(query, text, reply_markup=free_monitor_keyboard())
+
+
+async def monitor_exhausted(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show users who have used ALL free searches - potential buyers"""
+    query = update.callback_query
+    if not is_admin(query.from_user.id):
+        await query.answer("❌")
+        return
+    await query.answer()
+
+    users = load_users()
+    d1    = "\u2501" * 30
+    text  = (
+        d1 + "\n"
+        "🔴 *All Searches Used Up*\n"
+        "_(Potential buyers!)_\n" +
+        d1 + "\n\n"
+    )
+
+    count = 0
+    for uid, info in users.items():
+        if int(uid) in ADMIN_IDS:
+            continue
+        if info.get("is_premium", False):
+            continue
+
+        p_used = info.get("phone_free_used", 0)
+        e_used = info.get("email_free_used", 0)
+        p_left = max(0, PHONE_FREE_SEARCHES - p_used)
+        e_left = max(0, EMAIL_FREE_SEARCHES - e_used)
+
+        # Show only who has exhausted BOTH
+        if p_left <= 0 and e_left <= 0:
+            total_s = info.get("total_searches", 0)
+            added   = info.get("added", "N/A")
+            text += (
+                "🔴 `" + str(uid) + "`\n"
+                "   📱 Phone: 0/" + str(PHONE_FREE_SEARCHES) + " | "
+                "📧 Email: 0/" + str(EMAIL_FREE_SEARCHES) + "\n"
+                "   🔍 Total: " + str(total_s) + " | 📅 " + str(added) + "\n\n"
+            )
+            count += 1
+
+    if count == 0:
+        text += "_Koi nahi mila jo sab use kar chuka ho_\n"
+    else:
+        text += d1 + "\n"
+        text += "💡 *" + str(count) + " users* plan le sakte hain!\n"
+        text += "Contact: " + OWNER_CONTACT
+
+    if len(text) > 4000:
+        text = text[:3900] + "\n\n_...(4000 char limit)_"
+
+    await safe_edit(query, text, reply_markup=free_monitor_keyboard())
+
+
+async def monitor_active(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show users who still have free searches remaining"""
+    query = update.callback_query
+    if not is_admin(query.from_user.id):
+        await query.answer("❌")
+        return
+    await query.answer()
+
+    users = load_users()
+    d1    = "\u2501" * 30
+    text  = d1 + "\n🟢 *Active Free Users*\n_(Still has searches)_\n" + d1 + "\n\n"
+
+    count = 0
+    for uid, info in users.items():
+        if int(uid) in ADMIN_IDS:
+            continue
+        if info.get("is_premium", False):
+            continue
+
+        p_used = info.get("phone_free_used", 0)
+        e_used = info.get("email_free_used", 0)
+        p_left = max(0, PHONE_FREE_SEARCHES - p_used)
+        e_left = max(0, EMAIL_FREE_SEARCHES - e_used)
+
+        # Show only who still has at least one search left
+        if p_left > 0 or e_left > 0:
+            total_s = info.get("total_searches", 0)
+            added   = info.get("added", "N/A")
+            p_bar   = "🟢" * p_left + "🔴" * p_used
+            e_bar   = "🟢" * e_left + "🔴" * e_used
+            text += (
+                "🟢 `" + str(uid) + "`\n"
+                "   📱 " + p_bar + " (" + str(p_left) + "/" + str(PHONE_FREE_SEARCHES) + ")\n"
+                "   📧 " + e_bar + " (" + str(e_left) + "/" + str(EMAIL_FREE_SEARCHES) + ")\n"
+                "   🔍 " + str(total_s) + " searches | 📅 " + str(added) + "\n\n"
+            )
+            count += 1
+
+    if count == 0:
+        text += "_Koi active free user nahi hai_\n"
+
+    text += d1 + "\nTotal Active: " + str(count) + " users"
+
+    if len(text) > 4000:
+        text = text[:3900] + "\n\n_...(4000 char limit)_"
+
+    await safe_edit(query, text, reply_markup=free_monitor_keyboard())
+
+
+async def monitor_summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Full summary of all free/trial users"""
+    query = update.callback_query
+    if not is_admin(query.from_user.id):
+        await query.answer("❌")
+        return
+    await query.answer()
+
+    users = load_users()
+    d1    = "\u2501" * 30
+    d2    = "\u2501" * 25
+
+    # ✅ Categorize all users
+    total_users    = 0
+    phone_active   = []   # has phone searches
+    phone_done     = []   # phone exhausted
+    email_active   = []   # has email searches
+    email_done     = []   # email exhausted
+    both_exhausted = []   # both done = potential buyers
+    never_searched = []   # joined but never searched
+
+    for uid, info in users.items():
+        if int(uid) in ADMIN_IDS:
+            continue
+        if info.get("is_premium", False):
+            continue
+
+        total_users += 1
+        p_used  = info.get("phone_free_used", 0)
+        e_used  = info.get("email_free_used", 0)
+        p_left  = max(0, PHONE_FREE_SEARCHES - p_used)
+        e_left  = max(0, EMAIL_FREE_SEARCHES - e_used)
+        total_s = info.get("total_searches", 0)
+
+        if total_s == 0:
+            never_searched.append(uid)
+            continue
+
+        if p_left > 0:
+            phone_active.append(uid)
+        else:
+            phone_done.append(uid)
+
+        if e_left > 0:
+            email_active.append(uid)
+        else:
+            email_done.append(uid)
+
+        if p_left <= 0 and e_left <= 0:
+            both_exhausted.append(uid)
+
+    text = (
+        d1 + "\n"
+        "   📊 *Free Users Full Summary*\n" +
+        d1 + "\n\n"
+        "👥 Total Free/Trial Users: " + str(total_users) + "\n\n" +
+
+        d2 + "\n"
+        "📱 *Phone Trial*\n" +
+        d2 + "\n"
+        "🟢 Has searches : " + str(len(phone_active)) + "\n"
+        "🔴 All used     : " + str(len(phone_done)) + "\n\n" +
+
+        d2 + "\n"
+        "📧 *Email Free*\n" +
+        d2 + "\n"
+        "🟢 Has searches : " + str(len(email_active)) + "\n"
+        "🔴 All used     : " + str(len(email_done)) + "\n\n" +
+
+        d2 + "\n"
+        "💡 *Insights*\n" +
+        d2 + "\n"
+        "🔴 Both exhausted : " + str(len(both_exhausted)) + " _(Buy karo!)_\n"
+        "😴 Never searched : " + str(len(never_searched)) + "\n\n"
+    )
+
+    # ✅ List both_exhausted users (potential buyers)
+    if both_exhausted:
+        text += d2 + "\n"
+        text += "🛒 *Potential Buyers (ID list):*\n"
+        text += d2 + "\n"
+        for uid in both_exhausted[:20]:  # Max 20
+            text += "`" + str(uid) + "`\n"
+        if len(both_exhausted) > 20:
+            text += "_...aur " + str(len(both_exhausted) - 20) + " more_\n"
+        text += "\n"
+
+    # ✅ Never searched users
+    if never_searched:
+        text += d2 + "\n"
+        text += "😴 *Never Searched (ID list):*\n"
+        text += d2 + "\n"
+        for uid in never_searched[:10]:  # Max 10
+            text += "`" + str(uid) + "`\n"
+        if len(never_searched) > 10:
+            text += "_...aur " + str(len(never_searched) - 10) + " more_\n"
+
+    text += "\n" + d1 + "\n📅 " + str(date.today())
+
+    if len(text) > 4000:
+        text = text[:3900] + "\n\n_...(4000 char limit)_"
+
+    await safe_edit(query, text, reply_markup=free_monitor_keyboard())
+
 
 async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await start(update, context)
@@ -1792,22 +2142,33 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("admin", admin_panel))
-    app.add_handler(CallbackQueryHandler(mode_phone,         pattern="^mode_phone$"))
-    app.add_handler(CallbackQueryHandler(mode_email,         pattern="^mode_email$"))
-    app.add_handler(CallbackQueryHandler(profile,            pattern="^profile$"))
-    app.add_handler(CallbackQueryHandler(status_check,       pattern="^status$"))
-    app.add_handler(CallbackQueryHandler(help_menu,          pattern="^help$"))
-    app.add_handler(CallbackQueryHandler(buy,                pattern="^buy$"))
-    app.add_handler(CallbackQueryHandler(admin_list,         pattern="^admin_list$"))
-    app.add_handler(CallbackQueryHandler(admin_stats,        pattern="^admin_stats$"))
-    app.add_handler(CallbackQueryHandler(admin_back,         pattern="^admin_back$"))
-    app.add_handler(CallbackQueryHandler(main_menu_callback, pattern="^main_menu$"))
+
+    app.add_handler(CallbackQueryHandler(mode_phone,            pattern="^mode_phone$"))
+    app.add_handler(CallbackQueryHandler(mode_email,            pattern="^mode_email$"))
+    app.add_handler(CallbackQueryHandler(profile,               pattern="^profile$"))
+    app.add_handler(CallbackQueryHandler(status_check,          pattern="^status$"))
+    app.add_handler(CallbackQueryHandler(help_menu,             pattern="^help$"))
+    app.add_handler(CallbackQueryHandler(buy,                   pattern="^buy$"))
+    app.add_handler(CallbackQueryHandler(admin_list,            pattern="^admin_list$"))
+    app.add_handler(CallbackQueryHandler(admin_stats,           pattern="^admin_stats$"))
+    app.add_handler(CallbackQueryHandler(admin_back,            pattern="^admin_back$"))
+
+    # ✅ Free Monitor handlers
+    app.add_handler(CallbackQueryHandler(admin_free_monitor,    pattern="^admin_free_monitor$"))
+    app.add_handler(CallbackQueryHandler(monitor_phone,         pattern="^monitor_phone$"))
+    app.add_handler(CallbackQueryHandler(monitor_email,         pattern="^monitor_email$"))
+    app.add_handler(CallbackQueryHandler(monitor_exhausted,     pattern="^monitor_exhausted$"))
+    app.add_handler(CallbackQueryHandler(monitor_active,        pattern="^monitor_active$"))
+    app.add_handler(CallbackQueryHandler(monitor_summary,       pattern="^monitor_summary$"))
+
+    app.add_handler(CallbackQueryHandler(main_menu_callback,    pattern="^main_menu$"))
 
     print("🤖 Combined Bot Running!")
     print("🛡️  Admins    : " + str(ADMIN_IDS))
     print("✅ Ek Plan = Phone + Email dono!")
     print("📱 Phone Free: " + str(PHONE_FREE_SEARCHES))
     print("📧 Email Free: " + str(EMAIL_FREE_SEARCHES))
+    print("🆓 Free Monitor: Added!")
     print("⏹  Ctrl+C to stop\n")
 
     app.run_polling(
