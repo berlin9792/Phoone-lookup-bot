@@ -19,7 +19,7 @@ from telegram.request import HTTPXRequest
 # ================== CONFIG ==================
 BOT_TOKEN     = "8642873626:AAFy5F79opcK_NMJ7NgGItd6sRrfbOc4TJU"
 ADMIN_IDS     = [5057489358, 1968142314]
-DEFAULT_PIN   = "912036"
+DEFAULT_PIN   = "240841"
 API_URL       = "https://lk-api-pinsstm.ramaxinfo.workers.dev/"
 DATA_FILE     = Path("users.json")
 OWNER_CONTACT = "@theplayerror"
