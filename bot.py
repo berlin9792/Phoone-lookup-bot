@@ -3,12 +3,16 @@
 🔍 Phone & Email Intelligence Bot
 Combined Bot - Phone + Email Search
 ONE PLAN = BOTH ACCESS
++ Broadcast Feature
 """
 
 import json
+import os
+import threading
 import requests
 from datetime import date, timedelta
 from pathlib import Path
+from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler,
@@ -73,19 +77,36 @@ PLANS = {
 }
 
 # ================== STATES ==================
-PHONE_COUNTRY_SINGLE = 10
-PHONE_COUNTRY_BATCH  = 11
-PHONE_SINGLE_INDIA   = 12
-PHONE_SINGLE_OTHER   = 13
-PHONE_BATCH_INDIA    = 14
-PHONE_BATCH_OTHER    = 15
-EMAIL_SINGLE         = 20
-EMAIL_BATCH          = 21
-ADMIN_ADD_ID         = 30
-ADMIN_ADD_PLAN       = 31
-ADMIN_REM_ID         = 32
-ADMIN_EXP_ID         = 33
-ADMIN_EXP_PLAN       = 34
+PHONE_COUNTRY_SINGLE    = 10
+PHONE_COUNTRY_BATCH     = 11
+PHONE_SINGLE_INDIA      = 12
+PHONE_SINGLE_OTHER      = 13
+PHONE_BATCH_INDIA       = 14
+PHONE_BATCH_OTHER       = 15
+EMAIL_SINGLE            = 20
+EMAIL_BATCH             = 21
+ADMIN_ADD_ID            = 30
+ADMIN_ADD_PLAN          = 31
+ADMIN_REM_ID            = 32
+ADMIN_EXP_ID            = 33
+ADMIN_EXP_PLAN          = 34
+ADMIN_BROADCAST_MSG     = 35   # ✅ NEW
+ADMIN_BROADCAST_CONFIRM = 36   # ✅ NEW
+
+
+# ================== DUMMY WEBSERVER FOR RENDER ==================
+web_app = Flask(__name__)
+
+@web_app.route('/')
+def render_keep_alive():
+    return "Bot is active and running!", 200
+
+def start_webserver():
+    port = int(os.environ.get("PORT", 8080))
+    import logging
+    log = logging.getLogger('werkzeug')
+    log.setLevel(logging.ERROR)
+    web_app.run(host="0.0.0.0", port=port)
 
 
 # ================== ADMIN CHECK ==================
@@ -554,8 +575,10 @@ def admin_menu_keyboard():
         ],
         [
             InlineKeyboardButton("📊 Stats",        callback_data="admin_stats"),
-            # ✅ New Button - Free/Trial Monitor
             InlineKeyboardButton("🆓 Free Monitor", callback_data="admin_free_monitor"),
+        ],
+        [
+            InlineKeyboardButton("📢 Broadcast",    callback_data="admin_broadcast"),
         ],
         [
             InlineKeyboardButton("🔙 Main Menu",    callback_data="main_menu"),
@@ -594,7 +617,6 @@ def plan_select_keyboard(prefix: str):
         [InlineKeyboardButton("❌ Cancel", callback_data="admin_back")],
     ])
 
-# ✅ Free Monitor Sub-Menu Keyboard
 def free_monitor_keyboard():
     return InlineKeyboardMarkup([
         [
@@ -1705,9 +1727,8 @@ async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await safe_edit(query, text, reply_markup=admin_menu_keyboard())
 
 
-# ==================== ✅ FREE MONITOR ====================
+# ==================== FREE MONITOR ====================
 async def admin_free_monitor(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Main free monitor menu"""
     query = update.callback_query
     if not is_admin(query.from_user.id):
         await query.answer("❌")
@@ -1715,7 +1736,6 @@ async def admin_free_monitor(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.answer()
 
     users = load_users()
-    # Count free/trial users only (not premium, not admin)
     free_users = [
         (uid, info) for uid, info in users.items()
         if not info.get("is_premium", False) and int(uid) not in ADMIN_IDS
@@ -1749,7 +1769,6 @@ async def admin_free_monitor(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def monitor_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show all phone trial users with details"""
     query = update.callback_query
     if not is_admin(query.from_user.id):
         await query.answer("❌")
@@ -1778,7 +1797,6 @@ async def monitor_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             icon = "🔴"
 
-        # Progress bar
         bar = "🟢" * p_left + "🔴" * p_used
 
         text += (
@@ -1794,7 +1812,6 @@ async def monitor_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text += d1 + "\nTotal: " + str(count) + " users"
 
-    # Split if too long
     if len(text) > 4000:
         text = text[:3900] + "\n\n_...aur bhi hain (4000 char limit)_"
 
@@ -1802,7 +1819,6 @@ async def monitor_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def monitor_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show all email free users with details"""
     query = update.callback_query
     if not is_admin(query.from_user.id):
         await query.answer("❌")
@@ -1852,7 +1868,6 @@ async def monitor_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def monitor_exhausted(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show users who have used ALL free searches - potential buyers"""
     query = update.callback_query
     if not is_admin(query.from_user.id):
         await query.answer("❌")
@@ -1880,7 +1895,6 @@ async def monitor_exhausted(update: Update, context: ContextTypes.DEFAULT_TYPE):
         p_left = max(0, PHONE_FREE_SEARCHES - p_used)
         e_left = max(0, EMAIL_FREE_SEARCHES - e_used)
 
-        # Show only who has exhausted BOTH
         if p_left <= 0 and e_left <= 0:
             total_s = info.get("total_searches", 0)
             added   = info.get("added", "N/A")
@@ -1906,7 +1920,6 @@ async def monitor_exhausted(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def monitor_active(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show users who still have free searches remaining"""
     query = update.callback_query
     if not is_admin(query.from_user.id):
         await query.answer("❌")
@@ -1929,7 +1942,6 @@ async def monitor_active(update: Update, context: ContextTypes.DEFAULT_TYPE):
         p_left = max(0, PHONE_FREE_SEARCHES - p_used)
         e_left = max(0, EMAIL_FREE_SEARCHES - e_used)
 
-        # Show only who still has at least one search left
         if p_left > 0 or e_left > 0:
             total_s = info.get("total_searches", 0)
             added   = info.get("added", "N/A")
@@ -1955,7 +1967,6 @@ async def monitor_active(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def monitor_summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Full summary of all free/trial users"""
     query = update.callback_query
     if not is_admin(query.from_user.id):
         await query.answer("❌")
@@ -1966,14 +1977,13 @@ async def monitor_summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
     d1    = "\u2501" * 30
     d2    = "\u2501" * 25
 
-    # ✅ Categorize all users
     total_users    = 0
-    phone_active   = []   # has phone searches
-    phone_done     = []   # phone exhausted
-    email_active   = []   # has email searches
-    email_done     = []   # email exhausted
-    both_exhausted = []   # both done = potential buyers
-    never_searched = []   # joined but never searched
+    phone_active   = []
+    phone_done     = []
+    email_active   = []
+    email_done     = []
+    both_exhausted = []
+    never_searched = []
 
     for uid, info in users.items():
         if int(uid) in ADMIN_IDS:
@@ -2030,23 +2040,21 @@ async def monitor_summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "😴 Never searched : " + str(len(never_searched)) + "\n\n"
     )
 
-    # ✅ List both_exhausted users (potential buyers)
     if both_exhausted:
         text += d2 + "\n"
         text += "🛒 *Potential Buyers (ID list):*\n"
         text += d2 + "\n"
-        for uid in both_exhausted[:20]:  # Max 20
+        for uid in both_exhausted[:20]:
             text += "`" + str(uid) + "`\n"
         if len(both_exhausted) > 20:
             text += "_...aur " + str(len(both_exhausted) - 20) + " more_\n"
         text += "\n"
 
-    # ✅ Never searched users
     if never_searched:
         text += d2 + "\n"
         text += "😴 *Never Searched (ID list):*\n"
         text += d2 + "\n"
-        for uid in never_searched[:10]:  # Max 10
+        for uid in never_searched[:10]:
             text += "`" + str(uid) + "`\n"
         if len(never_searched) > 10:
             text += "_...aur " + str(len(never_searched) - 10) + " more_\n"
@@ -2059,6 +2067,174 @@ async def monitor_summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await safe_edit(query, text, reply_markup=free_monitor_keyboard())
 
 
+# ==================== 📢 BROADCAST FEATURE ====================
+async def admin_broadcast_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Start broadcast - ask for message"""
+    query = update.callback_query
+    if not is_admin(query.from_user.id):
+        await query.answer("❌")
+        return ConversationHandler.END
+    await query.answer()
+
+    users = load_users()
+    total_users = len(users)
+
+    d1 = "\u2501" * 30
+    text = (
+        d1 + "\n"
+        "   📢 *Broadcast Message*\n" +
+        d1 + "\n\n"
+        "👥 Total Users: *" + str(total_users) + "*\n\n"
+        "📝 Message likho jo sab users ko bhejna hai:\n\n"
+        "✅ Text, emoji, markdown support hai\n"
+        "✅ *Bold*, _italic_, `code` use kar sakte ho\n"
+        "✅ Links bhi kaam karenge\n\n"
+        "⚠️ /cancel to go back"
+    )
+    await safe_edit(query, text)
+    return ADMIN_BROADCAST_MSG
+
+
+async def admin_broadcast_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receive broadcast message and show preview"""
+    message = update.message.text.strip()
+
+    if not message:
+        await update.message.reply_text("❌ Empty message!\nTry again ya /cancel")
+        return ADMIN_BROADCAST_MSG
+
+    # Save message in context
+    context.user_data["broadcast_msg"] = message
+
+    users = load_users()
+    total_users = len(users)
+
+    d1 = "\u2501" * 30
+    preview = (
+        d1 + "\n"
+        "   📢 *Broadcast Preview*\n" +
+        d1 + "\n\n"
+        "📝 *Your Message:*\n\n" +
+        message + "\n\n" +
+        d1 + "\n"
+        "👥 Recipients: *" + str(total_users) + " users*\n\n"
+        "⚠️ Sure bhejna hai?"
+    )
+
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Yes, Send!",  callback_data="broadcast_confirm"),
+            InlineKeyboardButton("❌ Cancel",       callback_data="broadcast_cancel"),
+        ],
+    ])
+
+    await update.message.reply_text(preview, reply_markup=keyboard, parse_mode="Markdown")
+    return ADMIN_BROADCAST_CONFIRM
+
+
+async def admin_broadcast_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Confirm and send broadcast to all users"""
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == "broadcast_cancel":
+        await safe_edit(
+            query,
+            "❌ *Broadcast Cancelled!*",
+            reply_markup=admin_menu_keyboard()
+        )
+        context.user_data.pop("broadcast_msg", None)
+        return ConversationHandler.END
+
+    message = context.user_data.get("broadcast_msg", "")
+    if not message:
+        await safe_edit(
+            query,
+            "❌ *Message not found!*",
+            reply_markup=admin_menu_keyboard()
+        )
+        return ConversationHandler.END
+
+    users = load_users()
+    total = len(users)
+
+    # Header add to broadcast message
+    d1 = "\u2501" * 25
+    broadcast_text = (
+        "📢 *Announcement*\n" +
+        d1 + "\n\n" +
+        message + "\n\n" +
+        d1 + "\n"
+        "💬 " + OWNER_CONTACT
+    )
+
+    # Progress message
+    status_msg = await query.message.reply_text(
+        "🚀 *Broadcasting...*\n\n"
+        "📊 Progress: 0/" + str(total) + "\n"
+        "✅ Sent: 0\n"
+        "❌ Failed: 0",
+        parse_mode="Markdown"
+    )
+
+    sent    = 0
+    failed  = 0
+    blocked = 0
+    count   = 0
+
+    for uid in users.keys():
+        count += 1
+        try:
+            await context.bot.send_message(
+                chat_id=int(uid),
+                text=broadcast_text,
+                parse_mode="Markdown"
+            )
+            sent += 1
+        except Exception as e:
+            err_str = str(e).lower()
+            if "blocked" in err_str or "forbidden" in err_str or "not found" in err_str:
+                blocked += 1
+            else:
+                failed += 1
+
+        # Update progress every 10 users
+        if count % 10 == 0 or count == total:
+            try:
+                await status_msg.edit_text(
+                    "🚀 *Broadcasting...*\n\n"
+                    "📊 Progress: " + str(count) + "/" + str(total) + "\n"
+                    "✅ Sent: " + str(sent) + "\n"
+                    "🚫 Blocked: " + str(blocked) + "\n"
+                    "❌ Failed: " + str(failed),
+                    parse_mode="Markdown"
+                )
+            except Exception:
+                pass
+
+    # Final summary
+    d2 = "\u2501" * 25
+    final_text = (
+        "✅ *Broadcast Complete!*\n\n" +
+        d2 + "\n"
+        "👥 Total Users : " + str(total) + "\n"
+        "✅ Successful  : " + str(sent) + "\n"
+        "🚫 Blocked Bot : " + str(blocked) + "\n"
+        "❌ Failed      : " + str(failed) + "\n" +
+        d2 + "\n\n"
+        "📅 " + str(date.today())
+    )
+
+    await status_msg.edit_text(
+        final_text,
+        reply_markup=admin_menu_keyboard(),
+        parse_mode="Markdown"
+    )
+
+    context.user_data.pop("broadcast_msg", None)
+    return ConversationHandler.END
+
+
 async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await start(update, context)
     return ConversationHandler.END
@@ -2066,6 +2242,11 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 # ================== MAIN ==================
 def main():
+    # 🌐 Start Dummy Webserver for Render Keep-Alive Port Binding
+    web_server_thread = threading.Thread(target=start_webserver, daemon=True)
+    web_server_thread.start()
+    print("🌐 Keep-alive Flask server started on background thread!")
+
     request = HTTPXRequest(connect_timeout=60.0, read_timeout=60.0, write_timeout=60.0, pool_timeout=60.0)
     get_updates_request = HTTPXRequest(connect_timeout=60.0, read_timeout=60.0, write_timeout=60.0, pool_timeout=60.0)
     app = (
@@ -2133,10 +2314,26 @@ def main():
         per_message=False, allow_reentry=True,
     )
 
+    # ✅ NEW: Broadcast Conversation Handler
+    admin_broadcast_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(admin_broadcast_start, pattern="^admin_broadcast$")],
+        states={
+            ADMIN_BROADCAST_MSG: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, admin_broadcast_message)
+            ],
+            ADMIN_BROADCAST_CONFIRM: [
+                CallbackQueryHandler(admin_broadcast_confirm, pattern="^broadcast_(confirm|cancel)$")
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+        per_message=False, allow_reentry=True,
+    )
+
     for conv in [
         phone_single_conv, phone_batch_conv,
         email_single_conv, email_batch_conv,
         admin_add_conv, admin_remove_conv, admin_setplan_conv,
+        admin_broadcast_conv,  # ✅ NEW
     ]:
         app.add_handler(conv)
 
@@ -2153,7 +2350,6 @@ def main():
     app.add_handler(CallbackQueryHandler(admin_stats,           pattern="^admin_stats$"))
     app.add_handler(CallbackQueryHandler(admin_back,            pattern="^admin_back$"))
 
-    # ✅ Free Monitor handlers
     app.add_handler(CallbackQueryHandler(admin_free_monitor,    pattern="^admin_free_monitor$"))
     app.add_handler(CallbackQueryHandler(monitor_phone,         pattern="^monitor_phone$"))
     app.add_handler(CallbackQueryHandler(monitor_email,         pattern="^monitor_email$"))
@@ -2169,6 +2365,7 @@ def main():
     print("📱 Phone Free: " + str(PHONE_FREE_SEARCHES))
     print("📧 Email Free: " + str(EMAIL_FREE_SEARCHES))
     print("🆓 Free Monitor: Added!")
+    print("📢 Broadcast  : Added!")
     print("⏹  Ctrl+C to stop\n")
 
     app.run_polling(
