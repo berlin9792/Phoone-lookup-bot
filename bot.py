@@ -4,6 +4,7 @@
 Combined Bot - Phone + Email Search
 ONE PLAN = BOTH ACCESS
 + Broadcast Feature
++ Custom Days Plan
 """
 
 import json
@@ -90,8 +91,10 @@ ADMIN_ADD_PLAN          = 31
 ADMIN_REM_ID            = 32
 ADMIN_EXP_ID            = 33
 ADMIN_EXP_PLAN          = 34
-ADMIN_BROADCAST_MSG     = 35   # ✅ NEW
-ADMIN_BROADCAST_CONFIRM = 36   # ✅ NEW
+ADMIN_BROADCAST_MSG     = 35   
+ADMIN_BROADCAST_CONFIRM = 36   
+ADMIN_CUSTOM_DAYS       = 37   # ✅ New Custom Plan State
+ADMIN_CUSTOM_LIMIT      = 38   # ✅ New Custom Limit State
 
 
 # ================== DUMMY WEBSERVER FOR RENDER ==================
@@ -147,6 +150,26 @@ def get_or_create_user(user_id: int):
     return users[uid]
 
 
+# ================== PLAN RESOLVER ==================
+def get_user_plan_details(user_data: dict):
+    """Dynamically resolves built-in plans or custom user plans."""
+    plan_key = user_data.get("plan", "trial")
+    if plan_key.startswith("custom_"):
+        try:
+            days = int(plan_key.split("_")[1].replace("d", ""))
+        except Exception:
+            days = 30
+        return {
+            "name"       : f"Custom ({days} Days)",
+            "days"       : days,
+            "daily_limit": user_data.get("custom_limit", 0),
+            "unlimited"  : user_data.get("custom_unlimited", False),
+            "is_free"    : False,
+        }
+    else:
+        return PLANS.get(plan_key, PLANS["trial"])
+
+
 # ================== PLAN UPGRADE ==================
 def upgrade_user(user_id: int, plan_key: str):
     users     = load_users()
@@ -159,6 +182,25 @@ def upgrade_user(user_id: int, plan_key: str):
     user_data["is_premium"]           = True
     user_data["phone_daily_searches"] = 0
     user_data["phone_last_date"]      = ""
+    users[uid] = user_data
+    save_users(users)
+    return expiry
+
+def upgrade_user_custom(user_id: int, days: int, daily_limit: int, is_unlimited: bool):
+    """Saves custom subscription plans details in user profile."""
+    users     = load_users()
+    uid       = str(user_id)
+    user_data = get_or_create_user(user_id)
+    expiry    = (date.today() + timedelta(days=days)).isoformat()
+    
+    user_data["plan"]                 = f"custom_{days}d"
+    user_data["expiry"]               = expiry
+    user_data["is_premium"]           = True
+    user_data["phone_daily_searches"] = 0
+    user_data["phone_last_date"]      = ""
+    user_data["custom_limit"]         = daily_limit
+    user_data["custom_unlimited"]     = is_unlimited
+    
     users[uid] = user_data
     save_users(users)
     return expiry
@@ -178,10 +220,11 @@ def get_phone_daily_remaining(user_id: int) -> int:
     users     = load_users()
     uid       = str(user_id)
     user_data = users.get(uid, {})
-    plan_key  = user_data.get("plan", "trial")
-    plan      = PLANS.get(plan_key, PLANS["trial"])
+    plan      = get_user_plan_details(user_data)
+    
     if plan.get("unlimited", False):
         return 999999
+        
     daily_limit = plan.get("daily_limit", 0)
     today       = date.today().isoformat()
     last_date   = user_data.get("phone_last_date", "")
@@ -198,8 +241,7 @@ def use_phone_search(user_id: int):
     if user_data.get("phone_last_date", "") != today:
         user_data["phone_daily_searches"] = 0
         user_data["phone_last_date"]      = today
-    plan_key = user_data.get("plan", "trial")
-    plan     = PLANS.get(plan_key, PLANS["trial"])
+    plan = get_user_plan_details(user_data)
     if not is_admin(user_id):
         if plan.get("is_free", True):
             user_data["phone_free_used"] = user_data.get("phone_free_used", 0) + 1
@@ -217,8 +259,8 @@ def check_phone_access(user_id: int):
     users      = load_users()
     uid        = str(user_id)
     user_data  = users[uid]
+    plan       = get_user_plan_details(user_data)
     plan_key   = user_data.get("plan", "trial")
-    plan       = PLANS.get(plan_key, PLANS["trial"])
     expiry_str = user_data.get("expiry", "")
     is_premium = user_data.get("is_premium", False)
     if is_premium and expiry_str:
@@ -510,7 +552,8 @@ def phone_menu_keyboard(user_id: int):
         ok, _, _, is_premium, plan_key = check_phone_access(user_id)
         free_left = get_phone_free_remaining(user_id)
         daily_rem = get_phone_daily_remaining(user_id)
-        plan      = PLANS.get(plan_key, PLANS["trial"])
+        user_data = get_or_create_user(user_id)
+        plan      = get_user_plan_details(user_data)
         if is_premium:
             if plan.get("unlimited", False):
                 single_label = "🔍 Single (Unlimited)"
@@ -605,6 +648,7 @@ def buy_keyboard():
     ])
 
 def plan_select_keyboard(prefix: str):
+    """Modified to include the dynamic Custom Days selection button."""
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("🥉 7 Days  - Rs50",    callback_data=prefix + "_7days"),
@@ -613,6 +657,9 @@ def plan_select_keyboard(prefix: str):
         [
             InlineKeyboardButton("🥇 6 Months - Rs300",  callback_data=prefix + "_6months"),
             InlineKeyboardButton("💎 12 Months - Rs799", callback_data=prefix + "_12months"),
+        ],
+        [
+            InlineKeyboardButton("⚙️ Custom Days Plan", callback_data=prefix + "_custom"),
         ],
         [InlineKeyboardButton("❌ Cancel", callback_data="admin_back")],
     ])
@@ -679,8 +726,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_data = users.get(uid, {})
         is_prem   = user_data.get("is_premium", False)
         expiry    = user_data.get("expiry", "")
-        plan_key  = user_data.get("plan", "trial")
-        plan      = PLANS.get(plan_key, PLANS["trial"])
+        plan      = get_user_plan_details(user_data)
         p_free    = get_phone_free_remaining(user.id)
         e_free    = get_email_free_remaining(user.id)
 
@@ -690,10 +736,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 days_left = (exp_date - date.today()).days
                 if days_left >= 0:
                     daily_rem = get_phone_daily_remaining(user.id)
+                    daily_limit = plan.get("daily_limit", 0)
                     if plan.get("unlimited", False):
                         p_line = "💎 " + plan["name"] + " | Phone: Unlimited | " + str(days_left) + "d left"
                     else:
-                        p_line = "💎 " + plan["name"] + " | Phone: " + str(daily_rem) + "/" + str(plan.get("daily_limit", 0)) + " today | " + str(days_left) + "d left"
+                        p_line = "💎 " + plan["name"] + " | Phone: " + str(daily_rem) + "/" + str(daily_limit) + " today | " + str(days_left) + "d left"
                     e_line = "💎 " + plan["name"] + " | Email: Unlimited | " + str(days_left) + "d left"
                 else:
                     p_bar  = "🟢" * p_free + "🔴" * (PHONE_FREE_SEARCHES - p_free)
@@ -752,7 +799,8 @@ async def mode_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ok, status, days, is_premium, plan_key = check_phone_access(user.id)
         free_left = get_phone_free_remaining(user.id)
         daily_rem = get_phone_daily_remaining(user.id)
-        plan      = PLANS.get(plan_key, PLANS["trial"])
+        user_data = get_or_create_user(user.id)
+        plan      = get_user_plan_details(user_data)
         if is_premium:
             if plan.get("unlimited", False):
                 info = "💎 Unlimited"
@@ -827,9 +875,8 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     is_prem  = user_data.get("is_premium", False)
-    plan_key = user_data.get("plan", "trial")
-    plan     = PLANS.get(plan_key, PLANS["trial"])
     expiry   = user_data.get("expiry", "")
+    plan     = get_user_plan_details(user_data)
     p_free   = get_phone_free_remaining(user.id)
     e_free   = get_email_free_remaining(user.id)
 
@@ -915,16 +962,18 @@ async def status_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await safe_edit(query, text, reply_markup=back_keyboard())
         return
 
-    p_ok, p_status, p_days, p_premium, p_plan_key = check_phone_access(user.id)
+    p_ok, p_status, p_days, p_premium, plan_key = check_phone_access(user.id)
     e_ok, e_status, e_days, e_premium = check_email_access(user.id)
-    plan = PLANS.get(p_plan_key, PLANS["trial"])
+    user_data = get_or_create_user(user.id)
+    plan      = get_user_plan_details(user_data)
 
     if p_premium:
         daily_rem = get_phone_daily_remaining(user.id)
+        daily_limit = plan.get("daily_limit", 0)
         if plan.get("unlimited", False):
             p_line = "💎 " + plan["name"] + " | Phone: Unlimited | " + str(p_days) + "d left"
         else:
-            p_line = "💎 " + plan["name"] + " | Phone: " + str(daily_rem) + "/" + str(plan.get("daily_limit", 0)) + " | " + str(p_days) + "d left"
+            p_line = "💎 " + plan["name"] + " | Phone: " + str(daily_rem) + "/" + str(daily_limit) + " | " + str(p_days) + "d left"
         e_line = "💎 Email: Unlimited | " + str(e_days) + "d left"
         note   = "✅ Dono access active hai!"
     else:
@@ -1053,7 +1102,8 @@ async def phone_single_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
     else:
         free_left = get_phone_free_remaining(user.id)
         daily_rem = get_phone_daily_remaining(user.id)
-        plan      = PLANS.get(plan_key, PLANS["trial"])
+        user_data = get_or_create_user(user.id)
+        plan      = get_user_plan_details(user_data)
         if is_premium:
             info = "💎 Unlimited" if plan.get("unlimited") else "✅ " + str(daily_rem) + "/" + str(plan.get("daily_limit", 0)) + " today"
         else:
@@ -1092,7 +1142,8 @@ async def phone_batch_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         free_left = get_phone_free_remaining(user.id)
         daily_rem = get_phone_daily_remaining(user.id)
-        plan      = PLANS.get(plan_key, PLANS["trial"])
+        user_data = get_or_create_user(user.id)
+        plan      = get_user_plan_details(user_data)
         if is_premium:
             info = "💎 Unlimited" if plan.get("unlimited") else "✅ " + str(daily_rem) + "/" + str(plan.get("daily_limit", 0)) + " today"
         else:
@@ -1259,10 +1310,12 @@ async def _do_phone_single(update, context, number, display):
         if is_admin(user.id):
             text += "\n\n" + divider + "\n🛡️ Admin Search"
         elif is_premium:
-            plan      = PLANS.get(plan_key, PLANS["trial"])
+            user_data = get_or_create_user(user.id)
+            plan      = get_user_plan_details(user_data)
             daily_rem = get_phone_daily_remaining(user.id)
+            daily_limit = plan.get("daily_limit", 0)
             if not plan.get("unlimited", False):
-                text += "\n\n" + divider + "\n📊 Today: *" + str(daily_rem) + "/" + str(plan.get("daily_limit", 0)) + "*"
+                text += "\n\n" + divider + "\n📊 Today: *" + str(daily_rem) + "/" + str(daily_limit) + "*"
         else:
             free_left = get_phone_free_remaining(user.id)
             text += "\n\n" + divider + "\n🆓 Trial: *" + str(free_left) + "/" + str(PHONE_FREE_SEARCHES) + "*"
@@ -1276,7 +1329,8 @@ async def _do_phone_single(update, context, number, display):
 async def _do_phone_batch(update, context, numbers, country, warning=""):
     user  = update.effective_user
     ok, status, _, is_premium, plan_key = check_phone_access(user.id)
-    plan  = PLANS.get(plan_key, PLANS["trial"])
+    user_data = get_or_create_user(user.id)
+    plan  = get_user_plan_details(user_data)
     total = len(numbers)
     if is_admin(user.id):
         available = 999999
@@ -1647,8 +1701,7 @@ async def admin_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = d1 + "\n📋 *All Users (" + str(len(users)) + ")*\n" + d1 + "\n\n"
     for uid, info in users.items():
         is_prem = info.get("is_premium", False)
-        plan_k  = info.get("plan", "trial")
-        plan    = PLANS.get(plan_k, PLANS["trial"])
+        plan    = get_user_plan_details(info)
         total_s = info.get("total_searches", 0)
         expiry  = info.get("expiry", "")
         if int(uid) in ADMIN_IDS:
@@ -1685,6 +1738,8 @@ async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     expired        = 0
     trial          = 0
     plan_counts    = {k: 0 for k in PLANS}
+    plan_counts["custom"] = 0 # ✅ Track dynamic custom plans
+    
     for uid, info in users.items():
         total_searches += info.get("total_searches", 0)
         if int(uid) in ADMIN_IDS:
@@ -1695,7 +1750,10 @@ async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if date.today() <= exp:
                     active += 1
                     pk = info.get("plan", "trial")
-                    plan_counts[pk] = plan_counts.get(pk, 0) + 1
+                    if pk.startswith("custom_"):
+                        plan_counts["custom"] = plan_counts.get("custom", 0) + 1
+                    else:
+                        plan_counts[pk] = plan_counts.get(pk, 0) + 1
                 else:
                     expired += 1
             except Exception:
@@ -1721,7 +1779,8 @@ async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "  🥉 7D  : " + str(plan_counts.get("7days", 0)) + "\n"
         "  🥈 30D : " + str(plan_counts.get("30days", 0)) + "\n"
         "  🥇 6M  : " + str(plan_counts.get("6months", 0)) + "\n"
-        "  💎 12M : " + str(plan_counts.get("12months", 0)) + "\n\n"
+        "  💎 12M : " + str(plan_counts.get("12months", 0)) + "\n"
+        "  ⚙️ Custom: " + str(plan_counts.get("custom", 0)) + "\n\n"
         "📅 " + str(date.today()) + "\n"
     )
     await safe_edit(query, text, reply_markup=admin_menu_keyboard())
@@ -2235,6 +2294,73 @@ async def admin_broadcast_confirm(update: Update, context: ContextTypes.DEFAULT_
     return ConversationHandler.END
 
 
+# ==================== ⚙️ CUSTOM PLAN FEATURE ====================
+async def admin_custom_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Prompts admin for plan duration in days."""
+    query = update.callback_query
+    await query.answer()
+    
+    await safe_edit(
+        query,
+        "⚙️ *Custom Plan Creator*\n\n"
+        "Kitne din *(Days)* ka subscription plan active karna hai?\n"
+        "_(Sirf number type karo, eg: `45` ya `150`)_\n\n"
+        "👉 Enter /cancel to abort."
+    )
+    return ADMIN_CUSTOM_DAYS
+
+async def admin_custom_days_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Processes dynamic custom subscription duration."""
+    text = update.message.text.strip()
+    if not text.isdigit() or int(text) <= 0:
+        await update.message.reply_text("❌ Please enter a valid number of days!\nTry again or /cancel")
+        return ADMIN_CUSTOM_DAYS
+        
+    context.user_data["custom_days"] = int(text)
+    
+    await update.message.reply_text(
+        f"📅 Days saved: *{text} Days*\n\n"
+        "Ab is subscriber ki *Daily Phone Limit* enter karo:\n"
+        "👉 Sirf number type karo (eg: `10` ya `50`)\n"
+        "👉 Phone Unlimited limit ke liye enter karo: `0`\n\n"
+        "👉 Enter /cancel to abort.",
+        parse_mode="Markdown"
+    )
+    return ADMIN_CUSTOM_LIMIT
+
+async def admin_custom_limit_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Finalizes custom plan creation and updates user dataset."""
+    text = update.message.text.strip()
+    if not text.isdigit():
+        await update.message.reply_text("❌ Please enter a valid daily search limit!\nTry again or /cancel")
+        return ADMIN_CUSTOM_LIMIT
+        
+    limit = int(text)
+    is_unlimited = (limit == 0)
+    days = context.user_data.get("custom_days")
+    uid = context.user_data.get("admin_uid")
+    
+    expiry = upgrade_user_custom(int(uid), days, limit, is_unlimited)
+    limit_str = "Unlimited" if is_unlimited else f"{limit}/day"
+    
+    await update.message.reply_text(
+        "⚙️ *Custom Subscriptions Activated!*\n\n"
+        f"🆔 User ID: `{uid}`\n"
+        f"📅 Duration: *{days} Days*\n"
+        f"⌛ Expiry Date: *{expiry}*\n"
+        f"📱 Phone Limit: *{limit_str}*\n"
+        f"📧 Email Limit: *Unlimited*\n\n"
+        "✅ Dynamic custom settings updated successfully!",
+        reply_markup=admin_menu_keyboard(),
+        parse_mode="Markdown"
+    )
+    
+    # Cleaning environment
+    context.user_data.pop("custom_days", None)
+    context.user_data.pop("admin_uid", None)
+    return ConversationHandler.END
+
+
 async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await start(update, context)
     return ConversationHandler.END
@@ -2289,32 +2415,46 @@ def main():
         fallbacks=[CommandHandler("cancel", cancel)],
         per_message=False, allow_reentry=True,
     )
+    
+    # Updated: Custom Plan creators integrated into Admin Add User conv
     admin_add_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_add_start, pattern="^admin_add$")],
         states={
             ADMIN_ADD_ID:   [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_id)],
-            ADMIN_ADD_PLAN: [CallbackQueryHandler(admin_add_plan, pattern="^plan_|^admin_back$")],
+            ADMIN_ADD_PLAN: [
+                CallbackQueryHandler(admin_custom_start, pattern="^plan_custom$"),
+                CallbackQueryHandler(admin_add_plan, pattern="^plan_"),
+            ],
+            ADMIN_CUSTOM_DAYS:  [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_custom_days_process)],
+            ADMIN_CUSTOM_LIMIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_custom_limit_process)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
         per_message=False, allow_reentry=True,
     )
+    
     admin_remove_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_remove_start, pattern="^admin_remove$")],
         states={ADMIN_REM_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_remove_process)]},
         fallbacks=[CommandHandler("cancel", cancel)],
         per_message=False, allow_reentry=True,
     )
+    
+    # Updated: Custom Plan creators integrated into Admin Set Plan conv
     admin_setplan_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_setplan_start, pattern="^admin_setplan$")],
         states={
             ADMIN_EXP_ID:   [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_setplan_id)],
-            ADMIN_EXP_PLAN: [CallbackQueryHandler(admin_setplan_set, pattern="^plan_|^admin_back$")],
+            ADMIN_EXP_PLAN: [
+                CallbackQueryHandler(admin_custom_start, pattern="^plan_custom$"),
+                CallbackQueryHandler(admin_setplan_set, pattern="^plan_"),
+            ],
+            ADMIN_CUSTOM_DAYS:  [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_custom_days_process)],
+            ADMIN_CUSTOM_LIMIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_custom_limit_process)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
         per_message=False, allow_reentry=True,
     )
 
-    # ✅ NEW: Broadcast Conversation Handler
     admin_broadcast_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_broadcast_start, pattern="^admin_broadcast$")],
         states={
@@ -2333,7 +2473,7 @@ def main():
         phone_single_conv, phone_batch_conv,
         email_single_conv, email_batch_conv,
         admin_add_conv, admin_remove_conv, admin_setplan_conv,
-        admin_broadcast_conv,  # ✅ NEW
+        admin_broadcast_conv,  
     ]:
         app.add_handler(conv)
 
@@ -2366,6 +2506,7 @@ def main():
     print("📧 Email Free: " + str(EMAIL_FREE_SEARCHES))
     print("🆓 Free Monitor: Added!")
     print("📢 Broadcast  : Added!")
+    print("⚙️  Custom Plans: Added!")
     print("⏹  Ctrl+C to stop\n")
 
     app.run_polling(
