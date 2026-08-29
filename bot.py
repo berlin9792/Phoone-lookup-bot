@@ -29,7 +29,7 @@ BOT_TOKEN     = "8642873626:AAFy5F79opcK_NMJ7NgGItd6sRrfbOc4TJU"
 ADMIN_IDS     = [5057489358, 1968142314]
 DEFAULT_PIN   = "240841"
 API_URL       = "https://lk-api-pinsstm.ramaxinfo.workers.dev/"
-UPI_API_URL   = "https://nitin-developer-api-paid.nitinshab43.workers.dev/api"
+UPI_API_URL   = "https://nitin-developer-api-paid.nitinshab43.workers.dev/api?action=upiinfo"
 UPI_API_KEY   = "JAANI"
 OWNER_CONTACT = "@theplayerror"
 
