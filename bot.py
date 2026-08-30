@@ -3,7 +3,7 @@
 🔍 Ultimate Intelligence Bot
 Phone + Email + UPI + Aadhaar + Vehicle + IFSC
 ONE PLAN = ALL ACCESS
-+ Clean Results Only (ALL Metadata Blocked)
++ Clean Results Only (ALL Metadata Blocked except Phone)
 + Fast In-Memory Cache + MongoDB Cloud + 24/7 Keep Alive
 """
 
@@ -12,7 +12,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from flask import Flask
 from pymongo import MongoClient
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatMember
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler,
     MessageHandler, ConversationHandler, ContextTypes, filters
@@ -36,9 +36,8 @@ NITIN_API_KEY   = "JAANI"
 VEHICLE_API_KEY = "ansh"
 IFSC_API_KEY    = "NITIN"
 OWNER_CONTACT   = "@theplayerror"
-
-FORCE_JOIN_CHANNEL    = "@hackkwr"
-FORCE_JOIN_CHANNEL_ID = "@hackkwr"
+CHANNEL_LINK    = "https://t.me/hackkwr"
+CHANNEL_USERNAME = "@hackkwr"
 
 MONGO_URI = os.environ.get(
     "MONGO_URI",
@@ -151,7 +150,7 @@ try:
     mc.admin.command('ping')
     print("✅ MongoDB Connected!")
 except Exception as e:
-    print("⚠️ MongoDB Warning:", e)
+    print("⚠️ MongoDB Connection warning:", e)
     users_col = None
 
 DEFAULTS = {
@@ -441,7 +440,7 @@ def em(k):
         if kw in k: return e
     return "📌"
 
-# ================== 1. PHONE FORMATTER (STANDARD / UNCHANGED) ==================
+# ================== PHONE FORMATTER (STANDARD / UNCHANGED) ==================
 def fmt_rec(rec):
     lines = []
     for k, v in rec.items():
@@ -492,245 +491,90 @@ def format_phone_result(term, data):
         ls = fmt_rec(r); out.extend(ls if ls else ["_No data_"])
     return "\n".join(out)
 
-# ================== 2. CLEAN FORMATTERS (ALL METADATA 100% BLOCKED) ==================
-def format_email_clean(email_term, raw_data):
-    return format_phone_result(email_term, raw_data).replace("📱", "📧")
+# ================== METADATA CLEANER PIPELINE ==================
+def clean_metadata(data):
+    """Recursively strip key developer metadata from API payloads"""
+    if isinstance(data, dict):
+        cleaned = {}
+        for k, v in data.items():
+            if sk(k):
+                continue
+            cleaned_val = clean_metadata(v)
+            if not sv(cleaned_val):
+                cleaned[k] = cleaned_val
+        return cleaned
+    elif isinstance(data, list):
+        cleaned = []
+        for item in data:
+            cleaned_item = clean_metadata(item)
+            if not sv(cleaned_item):
+                cleaned.append(cleaned_item)
+        return cleaned
+    return data
 
-def format_upi_clean(upi_id, raw_data):
-    if not raw_data or not isinstance(raw_data, dict):
-        return f"💳 *UPI ID:* `{upi_id}`\n_No data found_"
-
-    # Dig directly to response -> data array
-    resp = raw_data.get("response", raw_data)
-    record = {}
-
-    if isinstance(resp, dict):
-        d_val = resp.get("data", resp)
-        if isinstance(d_val, list) and len(d_val) > 0: record = d_val[0]
-        elif isinstance(d_val, dict): record = d_val
-        else: record = resp
-    elif isinstance(resp, list) and len(resp) > 0:
-        record = resp[0]
-    else:
-        record = raw_data
-
+# ================== DYNAMIC CLEAN FORMATTERS ==================
+def format_clean_result(term, raw_data, icon="🔍"):
+    """Dyanmic metadata-free beautiful emojified output formatter"""
+    cleaned = clean_metadata(raw_data)
+    if not cleaned:
+        return f"{icon} *Result for* `{term}`\n_No data found_"
+    
+    # Flatten structure and extract all data record dictionaries
+    records = []
+    
+    def extract_records(item):
+        if isinstance(item, dict):
+            has_flat_fields = any(not isinstance(val, (dict, list)) for val in item.values())
+            if has_flat_fields:
+                records.append(item)
+            for val in item.values():
+                if isinstance(val, (dict, list)):
+                    extract_records(val)
+        elif isinstance(item, list):
+            for sub_item in item:
+                extract_records(sub_item)
+                
+    extract_records(cleaned)
+    
+    # Uniquify flattened records to avoid duplicates
+    unique_records = []
+    seen_fingerprints = set()
+    for rec in records:
+        fingerprint = "-".join(sorted(str(v).lower() for k, v in rec.items() if not isinstance(v, (dict, list))))
+        if fingerprint and fingerprint not in seen_fingerprints:
+            seen_fingerprints.add(fingerprint)
+            unique_records.append(rec)
+            
+    if not unique_records:
+        return f"{icon} *Result for* `{term}`\n_No data found_"
+        
     div = "━" * 28
-    lines = [
-        "💳 *UPI Verification Details*",
-        div,
-        f"🆔 *UPI ID:* `{upi_id}`"
-    ]
-
-    field_order = [
-        ("account_holder_name", "👤", "Account Holder"),
-        ("name", "👤", "Account Holder"),
-        ("payee_name", "👤", "Payee Name"),
-        ("vpa", "💳", "VPA"),
-        ("valid", "✅", "Status"),
-        ("merchant", "🏪", "Merchant"),
-        ("merchant_verified", "🛡️", "Merchant Verified"),
-        ("account_type", "🔖", "Account Type"),
-        ("bank_id", "🏦", "Bank ID"),
-        ("bank_name", "🏦", "Bank Name"),
-        ("ifsc", "🏦", "IFSC Code"),
-    ]
-
-    handled = set()
-    found = False
-
-    if isinstance(record, dict):
-        for k, icon, label in field_order:
-            if k in record:
-                val = record[k]; handled.add(k)
-                if sv(val): continue
-                if k == "valid": val_str = "Verified & Active ✅" if (val is True or str(val).lower() == "true") else "Invalid / Inactive ❌"
-                elif k == "merchant_verified": val_str = "Yes ✅" if (val is True or str(val).lower() == "true") else "No"
-                elif isinstance(val, bool): val_str = "Yes" if val else "No"
-                else: val_str = str(val).strip().title()
-                lines.append(f"{icon} *{label}:* `{val_str}`")
-                found = True
-
-        for k, v in record.items():
-            if k in handled or sk(k) or sv(v) or isinstance(v, (dict, list)): continue
-            lines.append(f"{em(k)} *{k.replace('_', ' ').title()}:* `{v}`")
-            found = True
-
-    if not found: lines.append("_No verification details available_")
-    lines.append(div); return "\n".join(lines)
-
-def format_aadhaar_clean(aadhaar_no, raw_data):
-    if not raw_data or not isinstance(raw_data, dict):
-        return f"🪪 *Aadhaar Number:* `{aadhaar_no}`\n_No data found_"
-
-    resp = raw_data.get("response", raw_data)
-    record = {}
-
-    if isinstance(resp, dict):
-        d_val = resp.get("data", resp)
-        if isinstance(d_val, list) and len(d_val) > 0: record = d_val[0]
-        elif isinstance(d_val, dict): record = d_val
-        else: record = resp
-    elif isinstance(resp, list) and len(resp) > 0:
-        record = resp[0]
-    else:
-        record = raw_data
-
-    div = "━" * 28
-    lines = [
-        "🪪 *Aadhaar Details*",
-        div,
-        f"🆔 *Aadhaar No:* `{aadhaar_no}`"
-    ]
-
-    field_order = [
-        ("name", "👤", "Full Name"),
-        ("father_name", "👨", "Father / Husband Name"),
-        ("care_of", "👨", "Care Of"),
-        ("gender", "🚻", "Gender"),
-        ("dob", "🎂", "Date of Birth"),
-        ("age", "🎂", "Age"),
-        ("phone", "📞", "Mobile"),
-        ("mobile", "📞", "Mobile"),
-        ("email", "📧", "Email"),
-        ("address", "📍", "Address"),
-        ("district", "🗺️", "District"),
-        ("state", "🗺️", "State"),
-        ("pincode", "📮", "Pincode"),
-    ]
-
-    handled = set()
-    found = False
-
-    if isinstance(record, dict):
-        for k, icon, label in field_order:
-            if k in record:
-                val = record[k]; handled.add(k)
-                if sv(val): continue
-                lines.append(f"{icon} *{label}:* `{str(val).strip().title()}`")
-                found = True
-
-        for k, v in record.items():
-            if k in handled or sk(k) or sv(v) or isinstance(v, (dict, list)): continue
-            lines.append(f"{em(k)} *{k.replace('_', ' ').title()}:* `{v}`")
-            found = True
-
-    if not found: lines.append("_No Aadhaar details found_")
-    lines.append(div); return "\n".join(lines)
-
-def format_vehicle_clean(rc_no, raw_data):
-    if not raw_data or not isinstance(raw_data, dict):
-        return f"🚗 *RC Number:* `{rc_no}`\n_No data found_"
-
-    resp = raw_data.get("result", raw_data.get("data", raw_data))
-    if isinstance(resp, list) and len(resp) > 0: record = resp[0]
-    elif isinstance(resp, dict): record = resp
-    else: record = raw_data
-
-    div = "━" * 28
-    lines = [
-        "🚗 *Vehicle RC Verification*",
-        div,
-        f"🆔 *RC Number:* `{rc_no}`"
-    ]
-
-    field_order = [
-        ("owner_name", "👤", "Owner Name"),
-        ("owner", "👤", "Owner Name"),
-        ("father_name", "👨", "Father Name"),
-        ("maker_model", "🚗", "Maker & Model"),
-        ("model", "🚗", "Model"),
-        ("vehicle_class", "🏷️", "Vehicle Class"),
-        ("fuel_type", "⛽", "Fuel Type"),
-        ("fuel", "⛽", "Fuel Type"),
-        ("engine_number", "🔧", "Engine Number"),
-        ("chassis_number", "🔧", "Chassis Number"),
-        ("registration_date", "📅", "Registration Date"),
-        ("reg_date", "📅", "Registration Date"),
-        ("fitness_upto", "📋", "Fitness Valid Upto"),
-        ("insurance_upto", "📋", "Insurance Valid Upto"),
-        ("insurance_company", "🏢", "Insurance Company"),
-        ("rto", "🏢", "Registering Authority (RTO)"),
-        ("rto_name", "🏢", "RTO"),
-        ("city", "🏙️", "City"),
-        ("state", "🗺️", "State"),
-    ]
-
-    handled = set()
-    found = False
-
-    if isinstance(record, dict):
-        for k, icon, label in field_order:
-            if k in record:
-                val = record[k]; handled.add(k)
-                if sv(val): continue
-                lines.append(f"{icon} *{label}:* `{str(val).strip().title()}`")
-                found = True
-
-        for k, v in record.items():
-            if k in handled or sk(k) or sv(v) or isinstance(v, (dict, list)): continue
-            lines.append(f"{em(k)} *{k.replace('_', ' ').title()}:* `{v}`")
-            found = True
-
-    if not found: lines.append("_No vehicle registration details found_")
-    lines.append(div); return "\n".join(lines)
-
-def format_ifsc_clean(ifsc_code, raw_data):
-    if not raw_data or not isinstance(raw_data, dict):
-        return f"🏦 *IFSC Code:* `{ifsc_code}`\n_No data found_"
-
-    resp = raw_data.get("data", raw_data.get("result", raw_data))
-    if isinstance(resp, list) and len(resp) > 0: record = resp[0]
-    elif isinstance(resp, dict): record = resp
-    else: record = raw_data
-
-    div = "━" * 28
-    lines = [
-        "🏦 *Bank IFSC Details*",
-        div,
-        f"🆔 *IFSC Code:* `{ifsc_code}`"
-    ]
-
-    normalized_rec = {str(k).lower(): v for k, v in record.items()} if isinstance(record, dict) else {}
-
-    field_order = [
-        ("bank", "🏦", "Bank Name"),
-        ("bank_name", "🏦", "Bank Name"),
-        ("branch", "🏢", "Branch"),
-        ("ifsc", "🔢", "IFSC Code"),
-        ("micr", "🔢", "MICR Code"),
-        ("swift", "🌐", "SWIFT Code"),
-        ("contact", "📞", "Contact"),
-        ("phone", "📞", "Phone"),
-        ("address", "📍", "Address"),
-        ("city", "🏙️", "City"),
-        ("district", "🗺️", "District"),
-        ("state", "🗺️", "State"),
-        ("centre", "📍", "Centre"),
-        ("rtgs", "⚡", "RTGS Enabled"),
-        ("neft", "⚡", "NEFT Enabled"),
-        ("imps", "⚡", "IMPS Enabled"),
-        ("upi", "⚡", "UPI Enabled"),
-    ]
-
-    handled = set()
-    found = False
-
-    for k, icon, label in field_order:
-        if k in normalized_rec:
-            val = normalized_rec[k]; handled.add(k)
-            if sv(val): continue
-            if isinstance(val, bool): val_str = "Yes ✅" if val else "No ❌"
-            else: val_str = str(val).strip().title()
-            lines.append(f"{icon} *{label}:* `{val_str}`")
-            found = True
-
-    for k, v in normalized_rec.items():
-        if k in handled or sk(k) or sv(v) or isinstance(v, (dict, list)): continue
-        lines.append(f"{em(k)} *{k.replace('_', ' ').title()}:* `{v}`")
-        found = True
-
-    if not found: lines.append("_No bank IFSC details found_")
-    lines.append(div); return "\n".join(lines)
+    out = [f"{icon} *Result for* `{term}`", f"📊 *{len(unique_records)} record(s) found*", div]
+    
+    for idx, rec in enumerate(unique_records, 1):
+        if len(unique_records) > 1:
+            out.append(f"\n*━━ Record #{idx} ━━*")
+        
+        # Add emojified clean records
+        for k, v in rec.items():
+            if isinstance(v, (dict, list)):
+                continue
+            emoji = em(k)
+            label = str(k).replace("_", " ").replace("-", " ").title()
+            
+            # Prettify booleans
+            if isinstance(v, bool):
+                val_str = "Yes ✅" if v else "No ❌"
+            elif str(v).lower() == "true":
+                val_str = "Yes ✅"
+            elif str(v).lower() == "false":
+                val_str = "No ❌"
+            else:
+                val_str = str(v).strip()
+                
+            out.append(f"{emoji} *{label}:* `{val_str}`")
+            
+    return "\n".join(out)
 
 # ================== KEYBOARDS ==================
 def main_kb(uid):
@@ -739,7 +583,7 @@ def main_kb(uid):
         [InlineKeyboardButton("💳 UPI", callback_data="mode_upi"), InlineKeyboardButton("🪪 Aadhaar", callback_data="mode_aadhaar")],
         [InlineKeyboardButton("🚗 Vehicle RC", callback_data="mode_vehicle"), InlineKeyboardButton("🏦 IFSC", callback_data="mode_ifsc")],
         [InlineKeyboardButton("👤 Profile", callback_data="profile"), InlineKeyboardButton("📊 Status", callback_data="status")],
-        [InlineKeyboardButton("📢 Channel", url=f"https://t.me/{FORCE_JOIN_CHANNEL.replace('@','')}"), InlineKeyboardButton("💰 Buy Plan", callback_data="buy")],
+        [InlineKeyboardButton("📢 Official Channel", url=CHANNEL_LINK), InlineKeyboardButton("💰 Buy Plan", callback_data="buy")],
         [InlineKeyboardButton("❓ Help Guide", callback_data="help")],
     ])
 
@@ -866,6 +710,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"{d1}\n  🔍 *Ultimate Intelligence Bot*\n{d1}\n\n"
             f"👋 Welcome *{u_name}*!\n\n"
             f"{d2}\n" + "\n".join(lines) + f"\n{d2}\n\n"
+            f"📢 *Join for Updates:* {CHANNEL_USERNAME}\n"
             "💡 *Ek plan se saare 6 features unlock!*\n\n"
             f"{d1}\nChoose search type below 👇"
         )
@@ -1437,7 +1282,7 @@ def main():
     ]:
         app.add_handler(CQ(f2, pattern=f"^{p}$"))
 
-    print("🤖 Bot Running! Metadata 100% Blocked.")
+    print("🤖 Bot Running! Metadata 100% Blocked & UPI Formatted.")
     app.run_polling(drop_pending_updates=True, allowed_updates=["message", "callback_query"])
 
 if __name__ == "__main__":
