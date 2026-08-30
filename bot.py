@@ -3,8 +3,7 @@
 🔍 Ultimate Intelligence Bot
 Phone + Email + UPI + Aadhaar + Vehicle + IFSC
 ONE PLAN = ALL ACCESS
-+ Fail-Safe Force Join Channel (@hackkwr)
-+ Clean Results Only (Metadata Hidden Except Phone)
++ Clean Results Only (ALL Metadata Blocked)
 + Fast In-Memory Cache + MongoDB Cloud + 24/7 Keep Alive
 """
 
@@ -125,14 +124,14 @@ def start_webserver():
     logging.getLogger('werkzeug').setLevel(logging.ERROR)
     web_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
 
-# ================== FORCE JOIN VERIFICATION ==================
+# ================== FORCE JOIN ==================
 async def check_joined(context, uid):
     if is_admin(uid): return True
     try:
         m = await asyncio.wait_for(context.bot.get_chat_member(FORCE_JOIN_CHANNEL_ID, uid), timeout=3.0)
         return m.status in ["member", "administrator", "creator", "restricted"]
     except Exception as e:
-        logger.warning(f"Force join check: Make sure bot is Admin in {FORCE_JOIN_CHANNEL}. Details: {e}")
+        logger.warning(f"Force join check warning: {e}")
         return False
 
 def force_join_kb():
@@ -349,7 +348,7 @@ def ifsc_daily(u): return daily_rem(u, "ifsc_daily", "ifsc_date")
 def ifsc_use(u): use_search(u, "ifsc_free_used", "ifsc_daily", "ifsc_date", "ifsc_total")
 def ifsc_check(u): return check_access(u, "ifsc_free_used", IFSC_FREE, "ifsc_daily", "ifsc_date", "IFSC")
 
-# ================== SAFE API CALLS (HIDE URL ON ERROR) ==================
+# ================== SAFE API CALLS ==================
 def _safe_api(fn):
     try: return fn()
     except requests.exceptions.Timeout:
@@ -394,16 +393,28 @@ def ifsc_api(code):
 
 # ================== METADATA SKIP LIST ==================
 SKIP_K = {
-    "timestamp","response_time","response_time_ms","developer","owner","credit","credits","powered_by","source","api","version","status","message","code","time","created_at","updated_at","server","watermark","signature","by","made_by","contact","channel","group","join","advertisement","ads","promo","query",
-    "key_usage", "key_expiry", "key_enabled", "daily_limit", "daily_used", "key", "api_key", "action", "parameters", "service", "success", "violations", "error", "auth", "plan", "limit", "used", "remaining", "total_requests", "request_id", "execution_time"
+    "metadata", "meta", "key_owner", "key_usage", "key_expiry", "key_enabled",
+    "daily_limit", "daily_used", "api_key", "key", "action", "parameters", "service",
+    "success", "violations", "timestamp", "response_time", "response_time_ms",
+    "developer", "owner", "credit", "credits", "powered_by", "source", "api", "version",
+    "status", "message", "code", "time", "created_at", "updated_at", "server", "watermark",
+    "signature", "by", "made_by", "contact", "channel", "group", "join", "advertisement",
+    "ads", "promo", "query", "req_id", "request_id", "execution_time", "fizzagirl", "nitin", "shree", "jaani"
 }
 SKIP_E = {"EncryptedPassword","encrypted_password","Salt","salt","PinCode","pin_code","CreditsInappPoints","IP","ip","TheDateOfTheEntrance"}
 
 def sk(k):
+    if not k: return True
     if k in SKIP_E: return True
     kl = str(k).lower().strip()
     if kl in SKIP_K: return True
-    for w in ["timestamp","response","developer","owner","credit","powered","source","version","watermark","pheevar","advertisement","promo","channel","server","api_","made_by","encrypted","password","salt","key_","daily_"]:
+    bad_words = [
+        "metadata", "timestamp", "response_time", "developer", "owner",
+        "credit", "powered", "source", "version", "watermark", "pheevar",
+        "advertisement", "promo", "channel", "server", "api_", "made_by",
+        "encrypted", "password", "salt", "key_", "daily_", "auth", "token", "fizza"
+    ]
+    for w in bad_words:
         if w in kl: return True
     return False
 
@@ -430,7 +441,7 @@ def em(k):
         if kw in k: return e
     return "📌"
 
-# ================== 1. PHONE FORMATTER ==================
+# ================== 1. PHONE FORMATTER (STANDARD / UNCHANGED) ==================
 def fmt_rec(rec):
     lines = []
     for k, v in rec.items():
@@ -481,7 +492,7 @@ def format_phone_result(term, data):
         ls = fmt_rec(r); out.extend(ls if ls else ["_No data_"])
     return "\n".join(out)
 
-# ================== 2. CLEAN FORMATTERS (METADATA HIDDEN) ==================
+# ================== 2. CLEAN FORMATTERS (ALL METADATA 100% BLOCKED) ==================
 def format_email_clean(email_term, raw_data):
     return format_phone_result(email_term, raw_data).replace("📱", "📧")
 
@@ -489,6 +500,7 @@ def format_upi_clean(upi_id, raw_data):
     if not raw_data or not isinstance(raw_data, dict):
         return f"💳 *UPI ID:* `{upi_id}`\n_No data found_"
 
+    # Dig directly to response -> data array
     resp = raw_data.get("response", raw_data)
     record = {}
 
@@ -526,21 +538,22 @@ def format_upi_clean(upi_id, raw_data):
     handled = set()
     found = False
 
-    for k, icon, label in field_order:
-        if k in record:
-            val = record[k]; handled.add(k)
-            if sv(val): continue
-            if k == "valid": val_str = "Verified & Active ✅" if (val is True or str(val).lower() == "true") else "Invalid / Inactive ❌"
-            elif k == "merchant_verified": val_str = "Yes ✅" if (val is True or str(val).lower() == "true") else "No"
-            elif isinstance(val, bool): val_str = "Yes" if val else "No"
-            else: val_str = str(val).strip().title()
-            lines.append(f"{icon} *{label}:* `{val_str}`")
-            found = True
+    if isinstance(record, dict):
+        for k, icon, label in field_order:
+            if k in record:
+                val = record[k]; handled.add(k)
+                if sv(val): continue
+                if k == "valid": val_str = "Verified & Active ✅" if (val is True or str(val).lower() == "true") else "Invalid / Inactive ❌"
+                elif k == "merchant_verified": val_str = "Yes ✅" if (val is True or str(val).lower() == "true") else "No"
+                elif isinstance(val, bool): val_str = "Yes" if val else "No"
+                else: val_str = str(val).strip().title()
+                lines.append(f"{icon} *{label}:* `{val_str}`")
+                found = True
 
-    for k, v in record.items():
-        if k in handled or sk(k) or sv(v): continue
-        lines.append(f"{em(k)} *{k.replace('_', ' ').title()}:* `{v}`")
-        found = True
+        for k, v in record.items():
+            if k in handled or sk(k) or sv(v) or isinstance(v, (dict, list)): continue
+            lines.append(f"{em(k)} *{k.replace('_', ' ').title()}:* `{v}`")
+            found = True
 
     if not found: lines.append("_No verification details available_")
     lines.append(div); return "\n".join(lines)
@@ -588,17 +601,18 @@ def format_aadhaar_clean(aadhaar_no, raw_data):
     handled = set()
     found = False
 
-    for k, icon, label in field_order:
-        if k in record:
-            val = record[k]; handled.add(k)
-            if sv(val): continue
-            lines.append(f"{icon} *{label}:* `{str(val).strip().title()}`")
-            found = True
+    if isinstance(record, dict):
+        for k, icon, label in field_order:
+            if k in record:
+                val = record[k]; handled.add(k)
+                if sv(val): continue
+                lines.append(f"{icon} *{label}:* `{str(val).strip().title()}`")
+                found = True
 
-    for k, v in record.items():
-        if k in handled or sk(k) or sv(v): continue
-        lines.append(f"{em(k)} *{k.replace('_', ' ').title()}:* `{v}`")
-        found = True
+        for k, v in record.items():
+            if k in handled or sk(k) or sv(v) or isinstance(v, (dict, list)): continue
+            lines.append(f"{em(k)} *{k.replace('_', ' ').title()}:* `{v}`")
+            found = True
 
     if not found: lines.append("_No Aadhaar details found_")
     lines.append(div); return "\n".join(lines)
@@ -644,17 +658,18 @@ def format_vehicle_clean(rc_no, raw_data):
     handled = set()
     found = False
 
-    for k, icon, label in field_order:
-        if k in record:
-            val = record[k]; handled.add(k)
-            if sv(val): continue
-            lines.append(f"{icon} *{label}:* `{str(val).strip().title()}`")
-            found = True
+    if isinstance(record, dict):
+        for k, icon, label in field_order:
+            if k in record:
+                val = record[k]; handled.add(k)
+                if sv(val): continue
+                lines.append(f"{icon} *{label}:* `{str(val).strip().title()}`")
+                found = True
 
-    for k, v in record.items():
-        if k in handled or sk(k) or sv(v): continue
-        lines.append(f"{em(k)} *{k.replace('_', ' ').title()}:* `{v}`")
-        found = True
+        for k, v in record.items():
+            if k in handled or sk(k) or sv(v) or isinstance(v, (dict, list)): continue
+            lines.append(f"{em(k)} *{k.replace('_', ' ').title()}:* `{v}`")
+            found = True
 
     if not found: lines.append("_No vehicle registration details found_")
     lines.append(div); return "\n".join(lines)
@@ -675,7 +690,7 @@ def format_ifsc_clean(ifsc_code, raw_data):
         f"🆔 *IFSC Code:* `{ifsc_code}`"
     ]
 
-    normalized_rec = {str(k).lower(): v for k, v in record.items()}
+    normalized_rec = {str(k).lower(): v for k, v in record.items()} if isinstance(record, dict) else {}
 
     field_order = [
         ("bank", "🏦", "Bank Name"),
@@ -710,7 +725,7 @@ def format_ifsc_clean(ifsc_code, raw_data):
             found = True
 
     for k, v in normalized_rec.items():
-        if k in handled or sk(k) or sv(v): continue
+        if k in handled or sk(k) or sv(v) or isinstance(v, (dict, list)): continue
         lines.append(f"{em(k)} *{k.replace('_', ' ').title()}:* `{v}`")
         found = True
 
@@ -1422,7 +1437,7 @@ def main():
     ]:
         app.add_handler(CQ(f2, pattern=f"^{p}$"))
 
-    print("🤖 Bot Running! Channel Verification Gate & Clean Formatters Active.")
+    print("🤖 Bot Running! Metadata 100% Blocked.")
     app.run_polling(drop_pending_updates=True, allowed_updates=["message", "callback_query"])
 
 if __name__ == "__main__":
