@@ -74,6 +74,29 @@ AADHAAR_SINGLE=50; AADHAAR_BATCH=51
 VEHICLE_SINGLE=60; VEHICLE_BATCH=61
 IFSC_SINGLE=70; IFSC_BATCH=71
 
+# ================== HELPERS DEFINED AT TOP (NO UNDEFINED BUGS) ==================
+async def safe_edit(query, text, reply_markup=None, parse_mode="Markdown"):
+    """Safely edit Telegram messages without throwing unhandled exceptions."""
+    try:
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+    except Exception as e:
+        logger.debug(f"safe_edit handled minor exception: {e}")
+
+def is_admin(uid):
+    return int(uid) in ADMIN_IDS
+
+def safe_name(user):
+    name = user.first_name or "User"
+    for ch in ["*", "_", "`", "[", "]"]:
+        name = name.replace(ch, "")
+    return name
+
+def valid_email(e): return "@" in e and "." in e.split("@")[-1] and " " not in e
+def valid_upi(u): return "@" in u and len(u)>=5 and " " not in u
+def valid_aadhaar(a): return a.isdigit() and len(a)==12
+def valid_ifsc(c): return len(c)==11 and c[:4].isalpha() and c[4]=="0"
+def make_bar(f, t): f=max(0,min(f,t)); return "█"*f+"░"*(t-f)
+
 # ================== FLASK KEEP-ALIVE ==================
 web_app = Flask(__name__)
 @web_app.route('/')
@@ -82,15 +105,6 @@ def start_webserver():
     import logging
     logging.getLogger('werkzeug').setLevel(logging.ERROR)
     web_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
-
-# ================== ADMIN CHECK ==================
-def is_admin(uid): return uid in ADMIN_IDS
-
-def safe_name(user):
-    name = user.first_name or "User"
-    for ch in ["*", "_", "`", "[", "]"]:
-        name = name.replace(ch, "")
-    return name
 
 # ================== FORCE JOIN ==================
 async def check_joined(context, uid):
@@ -178,7 +192,6 @@ def get_user(uid):
         except Exception as e:
             logger.error(f"MongoDB fallback error: {e}")
             
-    # Always guarantee return of dictionary to prevent "NoneType" crash
     users=load_users()
     if uid not in users:
         users[uid]={**DEFAULTS,"added":date.today().isoformat()}
@@ -265,6 +278,7 @@ def email_use(uid, is_p):
     if not is_admin(int(uid)) and not is_p: ud["email_free_used"]=ud.get("email_free_used",0)+1
     ud["email_total"]=ud.get("email_total",0)+1; ud["total_searches"]=ud.get("total_searches",0)+1
     save_user(uid,ud)
+
 def email_check(uid):
     if is_admin(uid): return True,"Admin ∞",9999,True
     ud=get_user(uid); is_p=ud.get("is_premium",False); exp_s=ud.get("expiry","")
@@ -301,7 +315,7 @@ def ifsc_daily(u): return daily_rem(u,"ifsc_daily","ifsc_date")
 def ifsc_use(u): use_search(u,"ifsc_free_used","ifsc_daily","ifsc_date","ifsc_total")
 def ifsc_check(u): return check_access(u,"ifsc_free_used",IFSC_FREE,"ifsc_daily","ifsc_date","IFSC")
 
-# ================== SAFE API CALLS (HIDE URL ON ERROR) ==================
+# ================== SAFE API CALLS ==================
 def _safe_api(fn):
     try: return fn()
     except requests.exceptions.Timeout:
