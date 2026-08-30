@@ -3,11 +3,12 @@
 🔍 Ultimate Intelligence Bot
 Phone + Email + UPI + Aadhaar + Vehicle + IFSC
 ONE PLAN = ALL ACCESS
-+ Clean Results Only (All Metadata Hidden Except Phone)
++ Fail-Safe Force Join Channel (@hackkwr)
++ Clean Results Only (Metadata Hidden Except Phone)
 + Fast In-Memory Cache + MongoDB Cloud + 24/7 Keep Alive
 """
 
-import json, os, threading, requests, logging
+import json, os, threading, requests, logging, asyncio
 from datetime import date, timedelta
 from pathlib import Path
 from flask import Flask
@@ -36,8 +37,9 @@ NITIN_API_KEY   = "JAANI"
 VEHICLE_API_KEY = "ansh"
 IFSC_API_KEY    = "NITIN"
 OWNER_CONTACT   = "@theplayerror"
-CHANNEL_LINK    = "https://t.me/hackkwr"
-CHANNEL_USERNAME = "@hackkwr"
+
+FORCE_JOIN_CHANNEL    = "@hackkwr"
+FORCE_JOIN_CHANNEL_ID = "@hackkwr"
 
 MONGO_URI = os.environ.get(
     "MONGO_URI",
@@ -74,7 +76,7 @@ AADHAAR_SINGLE=50; AADHAAR_BATCH=51
 VEHICLE_SINGLE=60; VEHICLE_BATCH=61
 IFSC_SINGLE=70; IFSC_BATCH=71
 
-# ================== SAFE SENDERS ==================
+# ================== SAFE SENDERS & UTILS ==================
 async def safe_reply(update: Update, text: str, reply_markup=None):
     try:
         if update.message:
@@ -122,6 +124,22 @@ def start_webserver():
     import logging
     logging.getLogger('werkzeug').setLevel(logging.ERROR)
     web_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+
+# ================== FORCE JOIN VERIFICATION ==================
+async def check_joined(context, uid):
+    if is_admin(uid): return True
+    try:
+        m = await asyncio.wait_for(context.bot.get_chat_member(FORCE_JOIN_CHANNEL_ID, uid), timeout=3.0)
+        return m.status in ["member", "administrator", "creator", "restricted"]
+    except Exception as e:
+        logger.warning(f"Force join check: Make sure bot is Admin in {FORCE_JOIN_CHANNEL}. Details: {e}")
+        return False
+
+def force_join_kb():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📢 Join Channel", url=f"https://t.me/{FORCE_JOIN_CHANNEL.replace('@','')}")],
+        [InlineKeyboardButton("✅ I Joined — Verify", callback_data="verify_join")],
+    ])
 
 # ================== IN-MEMORY CACHE + MONGODB ==================
 USERS_CACHE = {}
@@ -412,7 +430,7 @@ def em(k):
         if kw in k: return e
     return "📌"
 
-# ================== 1. PHONE FORMATTER (STANDARD / UNCHANGED) ==================
+# ================== 1. PHONE FORMATTER ==================
 def fmt_rec(rec):
     lines = []
     for k, v in rec.items():
@@ -463,7 +481,7 @@ def format_phone_result(term, data):
         ls = fmt_rec(r); out.extend(ls if ls else ["_No data_"])
     return "\n".join(out)
 
-# ================== 2. CLEAN DEDICATED FORMATTERS (NO METADATA) ==================
+# ================== 2. CLEAN FORMATTERS (METADATA HIDDEN) ==================
 def format_email_clean(email_term, raw_data):
     return format_phone_result(email_term, raw_data).replace("📱", "📧")
 
@@ -589,14 +607,10 @@ def format_vehicle_clean(rc_no, raw_data):
     if not raw_data or not isinstance(raw_data, dict):
         return f"🚗 *RC Number:* `{rc_no}`\n_No data found_"
 
-    # Strip metadata containers
     resp = raw_data.get("result", raw_data.get("data", raw_data))
-    if isinstance(resp, list) and len(resp) > 0:
-        record = resp[0]
-    elif isinstance(resp, dict):
-        record = resp
-    else:
-        record = raw_data
+    if isinstance(resp, list) and len(resp) > 0: record = resp[0]
+    elif isinstance(resp, dict): record = resp
+    else: record = raw_data
 
     div = "━" * 28
     lines = [
@@ -649,14 +663,10 @@ def format_ifsc_clean(ifsc_code, raw_data):
     if not raw_data or not isinstance(raw_data, dict):
         return f"🏦 *IFSC Code:* `{ifsc_code}`\n_No data found_"
 
-    # Strip metadata containers
     resp = raw_data.get("data", raw_data.get("result", raw_data))
-    if isinstance(resp, list) and len(resp) > 0:
-        record = resp[0]
-    elif isinstance(resp, dict):
-        record = resp
-    else:
-        record = raw_data
+    if isinstance(resp, list) and len(resp) > 0: record = resp[0]
+    elif isinstance(resp, dict): record = resp
+    else: record = raw_data
 
     div = "━" * 28
     lines = [
@@ -665,7 +675,6 @@ def format_ifsc_clean(ifsc_code, raw_data):
         f"🆔 *IFSC Code:* `{ifsc_code}`"
     ]
 
-    # Convert uppercase API keys like BANK, BRANCH to lower lookup
     normalized_rec = {str(k).lower(): v for k, v in record.items()}
 
     field_order = [
@@ -715,7 +724,7 @@ def main_kb(uid):
         [InlineKeyboardButton("💳 UPI", callback_data="mode_upi"), InlineKeyboardButton("🪪 Aadhaar", callback_data="mode_aadhaar")],
         [InlineKeyboardButton("🚗 Vehicle RC", callback_data="mode_vehicle"), InlineKeyboardButton("🏦 IFSC", callback_data="mode_ifsc")],
         [InlineKeyboardButton("👤 Profile", callback_data="profile"), InlineKeyboardButton("📊 Status", callback_data="status")],
-        [InlineKeyboardButton("📢 Official Channel", url=CHANNEL_LINK), InlineKeyboardButton("💰 Buy Plan", callback_data="buy")],
+        [InlineKeyboardButton("📢 Channel", url=f"https://t.me/{FORCE_JOIN_CHANNEL.replace('@','')}"), InlineKeyboardButton("💰 Buy Plan", callback_data="buy")],
         [InlineKeyboardButton("❓ Help Guide", callback_data="help")],
     ])
 
@@ -782,11 +791,29 @@ def monitor_kb():
         [InlineKeyboardButton("🔙 Admin Menu", callback_data="admin_back")],
     ])
 
-# ================== START ==================
+# ================== START & VERIFICATION ==================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     get_user(user.id)
     u_name = safe_name(user)
+
+    # Force Join Gate
+    if not is_admin(user.id):
+        joined = await check_joined(context, user.id)
+        if not joined:
+            d1 = "━" * 30
+            text = (
+                f"{d1}\n  🔍 *Ultimate Intelligence Bot*\n{d1}\n\n"
+                f"👋 Welcome *{u_name}*!\n\n"
+                "⚠️ *Bot use karne ke liye hamara channel join karein:*\n"
+                f"📢 Channel: {FORCE_JOIN_CHANNEL}\n\n"
+                "Join karne ke baad niche ✅ *Verify* button dabayein 👇"
+            )
+            if update.callback_query:
+                await safe_edit(update.callback_query, text, force_join_kb())
+            else:
+                await safe_reply(update, text, force_join_kb())
+            return ConversationHandler.END
 
     d1, d2 = "━" * 30, "━" * 25
     if is_admin(user.id):
@@ -794,7 +821,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"{d1}\n  🔍 *Ultimate Intelligence Bot*\n{d1}\n\n"
             f"👋 Welcome *{u_name}*! 🛡️ *Admin*\n\n"
             f"{d2}\n📱 Phone  : ∞ Unlimited\n📧 Email  : ∞ Unlimited\n💳 UPI    : ∞ Unlimited\n🪪 Aadhaar: ∞ Unlimited\n🚗 Vehicle: ∞ Unlimited\n🏦 IFSC   : ∞ Unlimited\n{d2}\n\n"
-            f"📢 *Official Channel:* {CHANNEL_USERNAME}\n\n"
             "Choose search type below 👇"
         )
     else:
@@ -825,7 +851,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"{d1}\n  🔍 *Ultimate Intelligence Bot*\n{d1}\n\n"
             f"👋 Welcome *{u_name}*!\n\n"
             f"{d2}\n" + "\n".join(lines) + f"\n{d2}\n\n"
-            f"📢 *Join for Updates:* {CHANNEL_USERNAME}\n"
             "💡 *Ek plan se saare 6 features unlock!*\n\n"
             f"{d1}\nChoose search type below 👇"
         )
@@ -836,9 +861,31 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await safe_reply(update, text, main_kb(user.id))
     return ConversationHandler.END
 
+async def verify_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    u = q.from_user
+    joined = await check_joined(context, u.id)
+    if joined:
+        await q.answer("✅ Channel join verified!", show_alert=False)
+        await start(update, context)
+    else:
+        await q.answer("❌ Aapne abhi channel join nahi kiya! Pehle join karein.", show_alert=True)
+        d1 = "━" * 30
+        text = (
+            f"{d1}\n  ⚠️ *Channel Join Required!*\n{d1}\n\n"
+            f"❌ *Aapne abhi channel join nahi kiya!*\n\n"
+            f"📢 Pehle join karein: {FORCE_JOIN_CHANNEL}\n\n"
+            "Join karne ke baad niche Verify dabayein 👇"
+        )
+        await safe_edit(q, text, force_join_kb())
+
 # ================== MODES ==================
 async def _mode(update, context, title, icon, chk, ff, df, mx, mkb):
     q = update.callback_query; await q.answer(); u = q.from_user
+    if not is_admin(u.id) and not await check_joined(context, u.id):
+        d1 = "━" * 30
+        await safe_edit(q, f"{d1}\n⚠️ *Channel Join Required!*\n{d1}\n\nBot use karne ke liye channel join karein:\n📢 {FORCE_JOIN_CHANNEL}\n\nJoin karke Verify dabayein 👇", force_join_kb())
+        return
     if is_admin(u.id): info = "🛡️ Admin — Unlimited"
     else:
         ok, _, _, ip, _ = chk(u.id)
@@ -850,6 +897,10 @@ async def _mode(update, context, title, icon, chk, ff, df, mx, mkb):
 async def mode_phone(u,c): await _mode(u,c,"Phone Search","📱",phone_check,phone_free,phone_daily,PHONE_FREE,lambda uid:search_kb(uid,phone_check,phone_free,phone_daily,"phone",PHONE_FREE))
 async def mode_email(update, context):
     q = update.callback_query; await q.answer(); u = q.from_user
+    if not is_admin(u.id) and not await check_joined(context, u.id):
+        d1 = "━" * 30
+        await safe_edit(q, f"{d1}\n⚠️ *Channel Join Required!*\n{d1}\n\nBot use karne ke liye channel join karein:\n📢 {FORCE_JOIN_CHANNEL}\n\nJoin karke Verify dabayein 👇", force_join_kb())
+        return
     if is_admin(u.id): info = "🛡️ Admin — Unlimited"
     else:
         ok, _, d, ip = email_check(u.id); fl = email_free(u.id)
@@ -946,15 +997,19 @@ async def _do_batch(update, context, api_fn, items, icon, use_fn, chk, fmt_fn):
     if msg: await msg.edit_text(f"✅ *Batch Complete!* Processed: {total}", reply_markup=main_kb(u.id), parse_mode="Markdown")
     else: await safe_reply(update, f"✅ *Batch Complete!* Processed: {total}", main_kb(u.id))
 
-# Phone
+# Phone Handlers
 async def phone_single_s2(u, c):
     q = u.callback_query; await q.answer()
+    if not is_admin(q.from_user.id) and not await check_joined(c, q.from_user.id):
+        await safe_edit(q, f"⚠️ *Channel Join Required!*\n📢 {FORCE_JOIN_CHANNEL}", force_join_kb()); return ConversationHandler.END
     ok, st, _, _, _ = phone_check(q.from_user.id)
     if not ok: await safe_edit(q, f"🔒 {st}\n💰 {OWNER_CONTACT}", buy_kb()); return ConversationHandler.END
     await safe_edit(q, "📱 Country select karo:", country_kb("single")); return PHONE_COUNTRY_SINGLE
 
 async def phone_batch_s2(u, c):
     q = u.callback_query; await q.answer()
+    if not is_admin(q.from_user.id) and not await check_joined(c, q.from_user.id):
+        await safe_edit(q, f"⚠️ *Channel Join Required!*\n📢 {FORCE_JOIN_CHANNEL}", force_join_kb()); return ConversationHandler.END
     ok, st, _, _, _ = phone_check(q.from_user.id)
     if not ok: await safe_edit(q, f"🔒 {st}\n💰 {OWNER_CONTACT}", buy_kb()); return ConversationHandler.END
     await safe_edit(q, "📦 Country select karo:", country_kb("batch")); return PHONE_COUNTRY_BATCH
@@ -997,9 +1052,11 @@ async def pbo(update, context):
     if not valid: await safe_reply(update, "❌ Koi valid number nahi!\n/cancel"); return PHONE_BATCH_OTHER
     await _do_batch(update, context, search_api, valid[:15], "📱", phone_use, phone_check, lambda t, d: format_phone_result("🌍 "+t, d)); return ConversationHandler.END
 
-# Email
+# Email Handlers
 async def email_ss(u, c):
     q = u.callback_query; await q.answer()
+    if not is_admin(q.from_user.id) and not await check_joined(c, q.from_user.id):
+        await safe_edit(q, f"⚠️ *Channel Join Required!*\n📢 {FORCE_JOIN_CHANNEL}", force_join_kb()); return ConversationHandler.END
     ok, st, _, _ = email_check(q.from_user.id)
     if not ok: await safe_edit(q, f"🔒 {st}\n💰 {OWNER_CONTACT}", buy_kb()); return ConversationHandler.END
     await safe_edit(q, "📧 *Email address daalo:*\n_Example: user@gmail.com_\n\n/cancel to go back"); return EMAIL_SINGLE
@@ -1011,6 +1068,8 @@ async def email_sp(update, context):
 
 async def email_bs(u, c):
     q = u.callback_query; await q.answer()
+    if not is_admin(q.from_user.id) and not await check_joined(c, q.from_user.id):
+        await safe_edit(q, f"⚠️ *Channel Join Required!*\n📢 {FORCE_JOIN_CHANNEL}", force_join_kb()); return ConversationHandler.END
     ok, st, _, _ = email_check(q.from_user.id)
     if not ok: await safe_edit(q, f"🔒 {st}", buy_kb()); return ConversationHandler.END
     await safe_edit(q, "📦 *Emails comma se daalo (Max 15):*\n\n/cancel to go back"); return EMAIL_BATCH
@@ -1020,9 +1079,11 @@ async def email_bp(update, context):
     if not emails: await safe_reply(update, "❌ Koi valid email nahi mila!\n/cancel"); return EMAIL_BATCH
     await _do_batch(update, context, search_api, emails, "📧", lambda uid: email_use(uid, email_check(uid)[3]), lambda uid: (*email_check(uid), None), format_email_clean); return ConversationHandler.END
 
-# UPI (Generic Example)
+# UPI Handlers
 async def upi_ss(u, c):
     q = u.callback_query; await q.answer()
+    if not is_admin(q.from_user.id) and not await check_joined(c, q.from_user.id):
+        await safe_edit(q, f"⚠️ *Channel Join Required!*\n📢 {FORCE_JOIN_CHANNEL}", force_join_kb()); return ConversationHandler.END
     ok, st, _, _, _ = upi_check(q.from_user.id)
     if not ok: await safe_edit(q, f"🔒 {st}\n💰 {OWNER_CONTACT}", buy_kb()); return ConversationHandler.END
     await safe_edit(q, "💳 *UPI ID daalo:*\n✅ `user@paytm`\n✅ `9876543210@ybl`\n✅ `name@oksbi`\n\n/cancel to go back"); return UPI_SINGLE
@@ -1034,6 +1095,8 @@ async def upi_sp(update, context):
 
 async def upi_bs(u, c):
     q = u.callback_query; await q.answer()
+    if not is_admin(q.from_user.id) and not await check_joined(c, q.from_user.id):
+        await safe_edit(q, f"⚠️ *Channel Join Required!*\n📢 {FORCE_JOIN_CHANNEL}", force_join_kb()); return ConversationHandler.END
     ok, st, _, _, _ = upi_check(q.from_user.id)
     if not ok: await safe_edit(q, f"🔒 {st}", buy_kb()); return ConversationHandler.END
     await safe_edit(q, "📦 *UPI IDs comma se daalo (Max 15):*\n\n/cancel to go back"); return UPI_BATCH
@@ -1043,9 +1106,11 @@ async def upi_bp(update, context):
     if not upis: await safe_reply(update, "❌ No valid UPI IDs!\n/cancel"); return UPI_BATCH
     await _do_batch(update, context, upi_api, upis, "💳", upi_use, upi_check, format_upi_clean); return ConversationHandler.END
 
-# Aadhaar
+# Aadhaar Handlers
 async def aadh_ss(u, c):
     q = u.callback_query; await q.answer()
+    if not is_admin(q.from_user.id) and not await check_joined(c, q.from_user.id):
+        await safe_edit(q, f"⚠️ *Channel Join Required!*\n📢 {FORCE_JOIN_CHANNEL}", force_join_kb()); return ConversationHandler.END
     ok, st, _, _, _ = aadhaar_check(q.from_user.id)
     if not ok: await safe_edit(q, f"🔒 {st}\n💰 {OWNER_CONTACT}", buy_kb()); return ConversationHandler.END
     await safe_edit(q, "🪪 *12 digit Aadhaar number daalo:*\n✅ `327567544017`\n\n/cancel to go back"); return AADHAAR_SINGLE
@@ -1057,6 +1122,8 @@ async def aadh_sp(update, context):
 
 async def aadh_bs(u, c):
     q = u.callback_query; await q.answer()
+    if not is_admin(q.from_user.id) and not await check_joined(c, q.from_user.id):
+        await safe_edit(q, f"⚠️ *Channel Join Required!*\n📢 {FORCE_JOIN_CHANNEL}", force_join_kb()); return ConversationHandler.END
     ok, st, _, _, _ = aadhaar_check(q.from_user.id)
     if not ok: await safe_edit(q, f"🔒 {st}", buy_kb()); return ConversationHandler.END
     await safe_edit(q, "📦 *Aadhaar numbers comma se daalo (Max 15):*\n\n/cancel to go back"); return AADHAAR_BATCH
@@ -1066,9 +1133,11 @@ async def aadh_bp(update, context):
     if not nums: await safe_reply(update, "❌ No valid Aadhaar numbers!\n/cancel"); return AADHAAR_BATCH
     await _do_batch(update, context, aadhaar_api, nums, "🪪", aadhaar_use, aadhaar_check, format_aadhaar_clean); return ConversationHandler.END
 
-# Vehicle RC
+# Vehicle Handlers
 async def veh_ss(u, c):
     q = u.callback_query; await q.answer()
+    if not is_admin(q.from_user.id) and not await check_joined(c, q.from_user.id):
+        await safe_edit(q, f"⚠️ *Channel Join Required!*\n📢 {FORCE_JOIN_CHANNEL}", force_join_kb()); return ConversationHandler.END
     ok, st, _, _, _ = vehicle_check(q.from_user.id)
     if not ok: await safe_edit(q, f"🔒 {st}\n💰 {OWNER_CONTACT}", buy_kb()); return ConversationHandler.END
     await safe_edit(q, "🚗 *Vehicle Number daalo:*\n✅ `MH01AB1234`\n✅ `DL3CCE1234`\n\n/cancel to go back"); return VEHICLE_SINGLE
@@ -1080,6 +1149,8 @@ async def veh_sp(update, context):
 
 async def veh_bs(u, c):
     q = u.callback_query; await q.answer()
+    if not is_admin(q.from_user.id) and not await check_joined(c, q.from_user.id):
+        await safe_edit(q, f"⚠️ *Channel Join Required!*\n📢 {FORCE_JOIN_CHANNEL}", force_join_kb()); return ConversationHandler.END
     ok, st, _, _, _ = vehicle_check(q.from_user.id)
     if not ok: await safe_edit(q, f"🔒 {st}", buy_kb()); return ConversationHandler.END
     await safe_edit(q, "📦 *RC numbers comma se daalo (Max 15):*\n\n/cancel to go back"); return VEHICLE_BATCH
@@ -1089,9 +1160,11 @@ async def veh_bp(update, context):
     if not rcs: await safe_reply(update, "❌ No valid vehicle numbers!\n/cancel"); return VEHICLE_BATCH
     await _do_batch(update, context, vehicle_api, rcs, "🚗", vehicle_use, vehicle_check, format_vehicle_clean); return ConversationHandler.END
 
-# IFSC
+# IFSC Handlers
 async def ifsc_ss(u, c):
     q = u.callback_query; await q.answer()
+    if not is_admin(q.from_user.id) and not await check_joined(c, q.from_user.id):
+        await safe_edit(q, f"⚠️ *Channel Join Required!*\n📢 {FORCE_JOIN_CHANNEL}", force_join_kb()); return ConversationHandler.END
     ok, st, _, _, _ = ifsc_check(q.from_user.id)
     if not ok: await safe_edit(q, f"🔒 {st}\n💰 {OWNER_CONTACT}", buy_kb()); return ConversationHandler.END
     await safe_edit(q, "🏦 *IFSC Code daalo:*\n✅ `SBIN0001234`\n✅ `HDFC0000001`\n\n/cancel to go back"); return IFSC_SINGLE
@@ -1103,6 +1176,8 @@ async def ifsc_sp(update, context):
 
 async def ifsc_bs(u, c):
     q = u.callback_query; await q.answer()
+    if not is_admin(q.from_user.id) and not await check_joined(c, q.from_user.id):
+        await safe_edit(q, f"⚠️ *Channel Join Required!*\n📢 {FORCE_JOIN_CHANNEL}", force_join_kb()); return ConversationHandler.END
     ok, st, _, _, _ = ifsc_check(q.from_user.id)
     if not ok: await safe_edit(q, f"🔒 {st}", buy_kb()); return ConversationHandler.END
     await safe_edit(q, "📦 *IFSC codes comma se daalo (Max 15):*\n\n/cancel to go back"); return IFSC_BATCH
@@ -1343,10 +1418,11 @@ def main():
         ("admin_back", admin_back), ("admin_free_monitor", adm_monitor),
         ("monitor_exhausted", mon_exhausted), ("monitor_active", mon_active),
         ("monitor_summary", mon_summary), ("main_menu", main_menu_cb),
+        ("verify_join", verify_join),
     ]:
         app.add_handler(CQ(f2, pattern=f"^{p}$"))
 
-    print("🤖 Bot Running! Metadata Hidden & Clean Formatters Active.")
+    print("🤖 Bot Running! Channel Verification Gate & Clean Formatters Active.")
     app.run_polling(drop_pending_updates=True, allowed_updates=["message", "callback_query"])
 
 if __name__ == "__main__":
