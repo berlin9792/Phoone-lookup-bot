@@ -3,7 +3,7 @@
 🔍 Ultimate Intelligence Bot
 Phone + Email + UPI + Aadhaar + Vehicle + IFSC
 ONE PLAN = ALL ACCESS
-+ Clean Results Only (ALL Metadata Blocked except Phone)
++ Clean Results Only (ALL Metadata Blocked)
 + Fast In-Memory Cache + MongoDB Cloud + 24/7 Keep Alive
 """
 
@@ -12,7 +12,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from flask import Flask
 from pymongo import MongoClient
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatMember
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler,
     MessageHandler, ConversationHandler, ContextTypes, filters
@@ -36,8 +36,9 @@ NITIN_API_KEY   = "JAANI"
 VEHICLE_API_KEY = "ansh"
 IFSC_API_KEY    = "NITIN"
 OWNER_CONTACT   = "@theplayerror"
-CHANNEL_LINK    = "https://t.me/hackkwr"
-CHANNEL_USERNAME = "@hackkwr"
+
+FORCE_JOIN_CHANNEL    = "@hackkwr"
+FORCE_JOIN_CHANNEL_ID = "@hackkwr"
 
 MONGO_URI = os.environ.get(
     "MONGO_URI",
@@ -91,13 +92,20 @@ async def safe_reply(update: Update, text: str, reply_markup=None):
         except Exception:
             pass
 
-async def safe_edit(query, text: str, reply_markup=None):
+async def safe_edit(target, text: str, reply_markup=None):
+    """Safely edits message whether target is a CallbackQuery or a Message object."""
     try:
-        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+        if hasattr(target, "edit_text"):
+            return await target.edit_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+        elif hasattr(target, "edit_message_text"):
+            return await target.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
     except Exception:
         clean = text.replace("*", "").replace("`", "").replace("_", "").replace("[", "").replace("]", "")
         try:
-            await query.edit_message_text(clean, reply_markup=reply_markup)
+            if hasattr(target, "edit_text"):
+                return await target.edit_text(clean, reply_markup=reply_markup)
+            elif hasattr(target, "edit_message_text"):
+                return await target.edit_message_text(clean, reply_markup=reply_markup)
         except Exception:
             pass
 
@@ -150,7 +158,7 @@ try:
     mc.admin.command('ping')
     print("✅ MongoDB Connected!")
 except Exception as e:
-    print("⚠️ MongoDB Connection warning:", e)
+    print("⚠️ MongoDB Warning:", e)
     users_col = None
 
 DEFAULTS = {
@@ -390,37 +398,35 @@ def ifsc_api(code):
         r.raise_for_status(); return {"ok": True, "data": r.json()}
     return _safe_api(call)
 
-# ================== METADATA SKIP LIST ==================
+# ================== STRICT METADATA FILTERING ==================
 SKIP_K = {
     "metadata", "meta", "key_owner", "key_usage", "key_expiry", "key_enabled",
     "daily_limit", "daily_used", "api_key", "key", "action", "parameters", "service",
     "success", "violations", "timestamp", "response_time", "response_time_ms",
     "developer", "owner", "credit", "credits", "powered_by", "source", "api", "version",
     "status", "message", "code", "time", "created_at", "updated_at", "server", "watermark",
-    "signature", "by", "made_by", "contact", "channel", "group", "join", "advertisement",
+    "signature", "by", "made_by", "contact_admin", "channel", "group", "join", "advertisement",
     "ads", "promo", "query", "req_id", "request_id", "execution_time", "fizzagirl", "nitin", "shree", "jaani"
 }
-SKIP_E = {"EncryptedPassword","encrypted_password","Salt","salt","PinCode","pin_code","CreditsInappPoints","IP","ip","TheDateOfTheEntrance"}
 
-def sk(k):
+def should_skip_key(k: str) -> bool:
     if not k: return True
-    if k in SKIP_E: return True
-    kl = str(k).lower().strip()
+    kl = str(k).lower().strip().replace(" ", "_")
     if kl in SKIP_K: return True
     bad_words = [
-        "metadata", "timestamp", "response_time", "developer", "owner",
-        "credit", "powered", "source", "version", "watermark", "pheevar",
-        "advertisement", "promo", "channel", "server", "api_", "made_by",
-        "encrypted", "password", "salt", "key_", "daily_", "auth", "token", "fizza"
+        "metadata", "timestamp", "response_time", "developer",
+        "credit", "powered", "watermark", "pheevar", "advertisement",
+        "promo", "channel", "server", "api_", "made_by", "encrypted",
+        "password", "salt", "key_", "daily_", "auth", "token", "fizza"
     ]
     for w in bad_words:
         if w in kl: return True
     return False
 
-def sv(v):
+def should_skip_val(v) -> bool:
     if v is None or v == "": return True
     vs = str(v).lower().strip()
-    if vs in ("", "none", "null", "n/a", "na", "-", "0", "0.00", "0000-00-00"): return True
+    if vs in ("", "none", "null", "n/a", "na", "-", "0", "0.00", "0000-00-00", "{}", "[]"): return True
     for s in ["@pheevar", "pheevar", "@lk_", "t.me/", "telegram.me/"]:
         if s in vs: return True
     return False
@@ -440,86 +446,34 @@ def em(k):
         if kw in k: return e
     return "📌"
 
-# ================== PHONE FORMATTER (STANDARD / UNCHANGED) ==================
-def fmt_rec(rec):
-    lines = []
-    for k, v in rec.items():
-        if sk(k) or sv(v): continue
-        if isinstance(v, dict):
-            for a, b in v.items():
-                if sk(a) or sv(b): continue
-                lines.append(f"{em(a)} *{a.replace('_',' ').title()}*: `{b}`")
-            continue
-        if isinstance(v, list):
-            cl = [str(i) for i in v if not sv(i)]
-            if cl: lines.append(f"{em(k)} *{k.replace('_',' ').title()}*: `{', '.join(cl)}`")
-            continue
-        lines.append(f"{em(k)} *{k.replace('_',' ').title()}*: `{v}`")
-    return lines
-
-def format_phone_result(term, data):
-    if not data: return f"📱 *{term}*\n_No data found_"
-    if isinstance(data, list):
-        if not data: return f"📱 *{term}*\n_No data found_"
-        if isinstance(data[0], dict): data = {"data": {"s": {"records": data}}}
-        else: return f"📱 *{term}*\n`{data[0]}`"
-    if not isinstance(data, dict): return f"📱 *{term}*\n`{data}`"
-    md = data.get("data", data); recs = []
-    if isinstance(md, dict):
-        hs = False
-        for k, v in md.items():
-            if isinstance(v, dict) and "records" in v:
-                hs = True
-                for r in (v["records"] if isinstance(v["records"], list) else []):
-                    if isinstance(r, dict): recs.append(r)
-        if not hs and "records" in md:
-            for r in (md["records"] if isinstance(md["records"], list) else []):
-                if isinstance(r, dict): recs.append(r)
-        if not recs and not hs: recs.append(md)
-    elif isinstance(md, list):
-        for r in md:
-            if isinstance(r, dict): recs.append(r)
-    if not recs: return f"📱 *{term}*\n_No data found_"
-    seen, uniq = set(), []
-    for r in recs:
-        ident = str(r.get("FullName", r.get("Name", r.get("Email", "")))).lower() + str(r.get("Phone", r.get("Phone2", "")))
-        if ident not in seen: seen.add(ident); uniq.append(r)
-    div = "━" * 28
-    out = [f"📱 *Result for* `{term}`", f"📊 *{len(uniq)} record(s)*", div]
-    for i, r in enumerate(uniq, 1):
-        if len(uniq) > 1: out.append(f"\n*━━ #{i} ━━*")
-        ls = fmt_rec(r); out.extend(ls if ls else ["_No data_"])
-    return "\n".join(out)
-
 # ================== METADATA CLEANER PIPELINE ==================
 def clean_metadata(data):
     """Recursively strip key developer metadata from API payloads"""
     if isinstance(data, dict):
         cleaned = {}
         for k, v in data.items():
-            if sk(k):
+            if should_skip_key(k):
                 continue
             cleaned_val = clean_metadata(v)
-            if not sv(cleaned_val):
+            if not should_skip_val(cleaned_val):
                 cleaned[k] = cleaned_val
         return cleaned
     elif isinstance(data, list):
         cleaned = []
         for item in data:
             cleaned_item = clean_metadata(item)
-            if not sv(cleaned_item):
+            if not should_skip_val(cleaned_item):
                 cleaned.append(cleaned_item)
         return cleaned
     return data
 
-# ================== DYNAMIC CLEAN FORMATTERS ==================
-def format_clean_result(term, raw_data, icon="🔍"):
+def format_universal_result(term: str, raw_data, icon: str = "🔍"):
     """Dyanmic metadata-free beautiful emojified output formatter"""
     cleaned = clean_metadata(raw_data)
     if not cleaned:
         return f"{icon} *Result for* `{term}`\n_No data found_"
     
-    # Flatten structure and extract all data record dictionaries
+    # Flatten nested structures to find real data items
     records = []
     
     def extract_records(item):
@@ -536,13 +490,13 @@ def format_clean_result(term, raw_data, icon="🔍"):
                 
     extract_records(cleaned)
     
-    # Uniquify flattened records to avoid duplicates
+    # Deduplicate extracted records
     unique_records = []
     seen_fingerprints = set()
     for rec in records:
-        fingerprint = "-".join(sorted(str(v).lower() for k, v in rec.items() if not isinstance(v, (dict, list))))
-        if fingerprint and fingerprint not in seen_fingerprints:
-            seen_fingerprints.add(fingerprint)
+        fp = "-".join(sorted(f"{k}:{v}" for k, v in rec.items() if not isinstance(v, (dict, list))))
+        if fp and fp not in seen_fingerprints:
+            seen_fingerprints.add(fp)
             unique_records.append(rec)
             
     if not unique_records:
@@ -555,24 +509,23 @@ def format_clean_result(term, raw_data, icon="🔍"):
         if len(unique_records) > 1:
             out.append(f"\n*━━ Record #{idx} ━━*")
         
-        # Add emojified clean records
         for k, v in rec.items():
-            if isinstance(v, (dict, list)):
+            if isinstance(v, (dict, list)) or should_skip_key(k) or should_skip_val(v):
                 continue
             emoji = em(k)
             label = str(k).replace("_", " ").replace("-", " ").title()
             
-            # Prettify booleans
+            # Format booleans nicely
             if isinstance(v, bool):
-                val_str = "Yes ✅" if v else "No ❌"
+                val_str = "Verified & Active ✅" if v else "Invalid / Inactive ❌"
             elif str(v).lower() == "true":
-                val_str = "Yes ✅"
+                val_str = "Verified & Active ✅"
             elif str(v).lower() == "false":
-                val_str = "No ❌"
+                val_str = "Invalid / Inactive ❌"
             else:
-                val_str = str(v).strip()
+                val_str = str(v).strip().title()
                 
-            out.append(f"{emoji} *{label}:* `{val_str}`")
+            out.append(f"{emoji} *{label}*: `{val_str}`")
             
     return "\n".join(out)
 
@@ -583,7 +536,7 @@ def main_kb(uid):
         [InlineKeyboardButton("💳 UPI", callback_data="mode_upi"), InlineKeyboardButton("🪪 Aadhaar", callback_data="mode_aadhaar")],
         [InlineKeyboardButton("🚗 Vehicle RC", callback_data="mode_vehicle"), InlineKeyboardButton("🏦 IFSC", callback_data="mode_ifsc")],
         [InlineKeyboardButton("👤 Profile", callback_data="profile"), InlineKeyboardButton("📊 Status", callback_data="status")],
-        [InlineKeyboardButton("📢 Official Channel", url=CHANNEL_LINK), InlineKeyboardButton("💰 Buy Plan", callback_data="buy")],
+        [InlineKeyboardButton("📢 Channel", url=f"https://t.me/{FORCE_JOIN_CHANNEL.replace('@','')}"), InlineKeyboardButton("💰 Buy Plan", callback_data="buy")],
         [InlineKeyboardButton("❓ Help Guide", callback_data="help")],
     ])
 
@@ -656,7 +609,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     get_user(user.id)
     u_name = safe_name(user)
 
-    # Force Join Gate
+    # Force Join Check
     if not is_admin(user.id):
         joined = await check_joined(context, user.id)
         if not joined:
@@ -710,7 +663,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"{d1}\n  🔍 *Ultimate Intelligence Bot*\n{d1}\n\n"
             f"👋 Welcome *{u_name}*!\n\n"
             f"{d2}\n" + "\n".join(lines) + f"\n{d2}\n\n"
-            f"📢 *Join for Updates:* {CHANNEL_USERNAME}\n"
             "💡 *Ek plan se saare 6 features unlock!*\n\n"
             f"{d1}\nChoose search type below 👇"
         )
@@ -828,7 +780,7 @@ async def buy(update, context):
     await safe_edit(q, t, buy_kb())
 
 # ================== SEARCH EXECUTION ==================
-async def _do_single(update, context, api_fn, term, display, icon, use_fn, chk, fmt_fn):
+async def _do_single(update, context, api_fn, term, display, icon, use_fn, chk):
     u = update.effective_user
     r = chk(u.id); ok = r[0]; st = r[1]
     if not ok: await safe_reply(update, f"🔒 *Locked!*\n{st}\n💰 {OWNER_CONTACT}", buy_kb()); return
@@ -836,25 +788,26 @@ async def _do_single(update, context, api_fn, term, display, icon, use_fn, chk, 
     res = api_fn(term)
     if res["ok"]:
         use_fn(u.id)
-        text = fmt_fn(term, res["data"])
-        if msg: await msg.edit_text(text, reply_markup=main_kb(u.id), parse_mode="Markdown")
+        text = format_universal_result(display, res["data"], icon)
+        if msg: await safe_edit(msg, text, main_kb(u.id))
         else: await safe_reply(update, text, main_kb(u.id))
     else:
-        if msg: await msg.edit_text(f"❌ *Search Failed*\n`{res['error']}`", reply_markup=back_kb(), parse_mode="Markdown")
-        else: await safe_reply(update, f"❌ *Search Failed*\n`{res['error']}`", back_kb())
+        err_msg = f"❌ *Search Failed*\n`{res['error']}`"
+        if msg: await safe_edit(msg, err_msg, back_kb())
+        else: await safe_reply(update, err_msg, back_kb())
 
-async def _do_batch(update, context, api_fn, items, icon, use_fn, chk, fmt_fn):
+async def _do_batch(update, context, api_fn, items, icon, use_fn, chk):
     u = update.effective_user; total = len(items)
     msg = await safe_reply(update, f"🚀 Processing {total} items...")
     for i, item in enumerate(items, 1):
         res = api_fn(item)
         if res["ok"]:
             use_fn(u.id)
-            text = fmt_fn(item, res["data"])
+            text = format_universal_result(item, res["data"], icon)
             await safe_reply(update, text)
         else:
             await safe_reply(update, f"❌ *{item}*\n`{res['error']}`")
-    if msg: await msg.edit_text(f"✅ *Batch Complete!* Processed: {total}", reply_markup=main_kb(u.id), parse_mode="Markdown")
+    if msg: await safe_edit(msg, f"✅ *Batch Complete!* Processed: {total}", main_kb(u.id))
     else: await safe_reply(update, f"✅ *Batch Complete!* Processed: {total}", main_kb(u.id))
 
 # Phone Handlers
@@ -890,12 +843,12 @@ async def psi(update, context):
     cl = update.message.text.strip().replace(" ","").replace("-","").replace("+","")
     if cl.startswith("91") and len(cl) == 12: cl = cl[2:]
     if not cl.isdigit() or len(cl) != 10: await safe_reply(update, "❌ 10 digit Indian number daalo!\n/cancel"); return PHONE_SINGLE_INDIA
-    await _do_single(update, context, search_api, "91"+cl, "🇮🇳 91"+cl, "📱", phone_use, phone_check, lambda t, d: format_phone_result("🇮🇳 "+t, d)); return ConversationHandler.END
+    await _do_single(update, context, search_api, "91"+cl, "🇮🇳 91"+cl, "📱", phone_use, phone_check); return ConversationHandler.END
 
 async def pso(update, context):
     cl = update.message.text.strip().replace(" ","").replace("-","").replace("+","")
     if not cl.isdigit() or not(7 <= len(cl) <= 15): await safe_reply(update, "❌ 7-15 digit number daalo!\n/cancel"); return PHONE_SINGLE_OTHER
-    await _do_single(update, context, search_api, cl, "🌍 "+cl, "📱", phone_use, phone_check, lambda t, d: format_phone_result("🌍 "+t, d)); return ConversationHandler.END
+    await _do_single(update, context, search_api, cl, "🌍 "+cl, "📱", phone_use, phone_check); return ConversationHandler.END
 
 async def pbi(update, context):
     nums = [n.strip().replace(" ","").replace("-","").replace("+","") for n in update.message.text.split(",") if n.strip()]
@@ -904,13 +857,13 @@ async def pbi(update, context):
         if n.startswith("91") and len(n) == 12: n = n[2:]
         if n.isdigit() and len(n) == 10 and "91"+n not in valid: valid.append("91"+n)
     if not valid: await safe_reply(update, "❌ Koi valid number nahi!\n/cancel"); return PHONE_BATCH_INDIA
-    await _do_batch(update, context, search_api, valid[:15], "📱", phone_use, phone_check, lambda t, d: format_phone_result("🇮🇳 "+t, d)); return ConversationHandler.END
+    await _do_batch(update, context, search_api, valid[:15], "📱", phone_use, phone_check); return ConversationHandler.END
 
 async def pbo(update, context):
     nums = [n.strip().replace(" ","").replace("-","").replace("+","") for n in update.message.text.split(",") if n.strip()]
     valid = [n for n in nums if n.isdigit() and 7 <= len(n) <= 15]
     if not valid: await safe_reply(update, "❌ Koi valid number nahi!\n/cancel"); return PHONE_BATCH_OTHER
-    await _do_batch(update, context, search_api, valid[:15], "📱", phone_use, phone_check, lambda t, d: format_phone_result("🌍 "+t, d)); return ConversationHandler.END
+    await _do_batch(update, context, search_api, valid[:15], "📱", phone_use, phone_check); return ConversationHandler.END
 
 # Email Handlers
 async def email_ss(u, c):
@@ -924,7 +877,7 @@ async def email_ss(u, c):
 async def email_sp(update, context):
     e = update.message.text.strip()
     if not valid_email(e): await safe_reply(update, "❌ Invalid email format!\n/cancel"); return EMAIL_SINGLE
-    await _do_single(update, context, search_api, e, e, "📧", lambda uid: email_use(uid, email_check(uid)[3]), lambda uid: (*email_check(uid), None), format_email_clean); return ConversationHandler.END
+    await _do_single(update, context, search_api, e, e, "📧", lambda uid: email_use(uid, email_check(uid)[3]), lambda uid: (*email_check(uid), None)); return ConversationHandler.END
 
 async def email_bs(u, c):
     q = u.callback_query; await q.answer()
@@ -937,7 +890,7 @@ async def email_bs(u, c):
 async def email_bp(update, context):
     emails = [e.strip() for e in update.message.text.split(",") if valid_email(e.strip())][:15]
     if not emails: await safe_reply(update, "❌ Koi valid email nahi mila!\n/cancel"); return EMAIL_BATCH
-    await _do_batch(update, context, search_api, emails, "📧", lambda uid: email_use(uid, email_check(uid)[3]), lambda uid: (*email_check(uid), None), format_email_clean); return ConversationHandler.END
+    await _do_batch(update, context, search_api, emails, "📧", lambda uid: email_use(uid, email_check(uid)[3]), lambda uid: (*email_check(uid), None)); return ConversationHandler.END
 
 # UPI Handlers
 async def upi_ss(u, c):
@@ -951,7 +904,7 @@ async def upi_ss(u, c):
 async def upi_sp(update, context):
     uid = update.message.text.strip()
     if not valid_upi(uid): await safe_reply(update, "❌ Format: `name@bank`\n/cancel"); return UPI_SINGLE
-    await _do_single(update, context, upi_api, uid, uid, "💳", upi_use, upi_check, format_upi_clean); return ConversationHandler.END
+    await _do_single(update, context, upi_api, uid, uid, "💳", upi_use, upi_check); return ConversationHandler.END
 
 async def upi_bs(u, c):
     q = u.callback_query; await q.answer()
@@ -964,7 +917,7 @@ async def upi_bs(u, c):
 async def upi_bp(update, context):
     upis = [u.strip() for u in update.message.text.split(",") if valid_upi(u.strip())][:15]
     if not upis: await safe_reply(update, "❌ No valid UPI IDs!\n/cancel"); return UPI_BATCH
-    await _do_batch(update, context, upi_api, upis, "💳", upi_use, upi_check, format_upi_clean); return ConversationHandler.END
+    await _do_batch(update, context, upi_api, upis, "💳", upi_use, upi_check); return ConversationHandler.END
 
 # Aadhaar Handlers
 async def aadh_ss(u, c):
@@ -978,7 +931,7 @@ async def aadh_ss(u, c):
 async def aadh_sp(update, context):
     a = update.message.text.strip().replace(" ", "").replace("-", "")
     if not valid_aadhaar(a): await safe_reply(update, "❌ 12 digits Aadhaar number daalo!\n/cancel"); return AADHAAR_SINGLE
-    await _do_single(update, context, aadhaar_api, a, a, "🪪", aadhaar_use, aadhaar_check, format_aadhaar_clean); return ConversationHandler.END
+    await _do_single(update, context, aadhaar_api, a, a, "🪪", aadhaar_use, aadhaar_check); return ConversationHandler.END
 
 async def aadh_bs(u, c):
     q = u.callback_query; await q.answer()
@@ -991,7 +944,7 @@ async def aadh_bs(u, c):
 async def aadh_bp(update, context):
     nums = [a.strip().replace(" ", "").replace("-", "") for a in update.message.text.split(",") if valid_aadhaar(a.strip().replace(" ", "").replace("-", ""))][:15]
     if not nums: await safe_reply(update, "❌ No valid Aadhaar numbers!\n/cancel"); return AADHAAR_BATCH
-    await _do_batch(update, context, aadhaar_api, nums, "🪪", aadhaar_use, aadhaar_check, format_aadhaar_clean); return ConversationHandler.END
+    await _do_batch(update, context, aadhaar_api, nums, "🪪", aadhaar_use, aadhaar_check); return ConversationHandler.END
 
 # Vehicle Handlers
 async def veh_ss(u, c):
@@ -1005,7 +958,7 @@ async def veh_ss(u, c):
 async def veh_sp(update, context):
     rc = update.message.text.strip().upper().replace(" ", "").replace("-", "")
     if len(rc) < 4: await safe_reply(update, "❌ Valid vehicle number daalo!\n/cancel"); return VEHICLE_SINGLE
-    await _do_single(update, context, vehicle_api, rc, rc, "🚗", vehicle_use, vehicle_check, format_vehicle_clean); return ConversationHandler.END
+    await _do_single(update, context, vehicle_api, rc, rc, "🚗", vehicle_use, vehicle_check); return ConversationHandler.END
 
 async def veh_bs(u, c):
     q = u.callback_query; await q.answer()
@@ -1018,7 +971,7 @@ async def veh_bs(u, c):
 async def veh_bp(update, context):
     rcs = [r.strip().upper().replace(" ", "").replace("-", "") for r in update.message.text.split(",") if len(r.strip()) >= 4][:15]
     if not rcs: await safe_reply(update, "❌ No valid vehicle numbers!\n/cancel"); return VEHICLE_BATCH
-    await _do_batch(update, context, vehicle_api, rcs, "🚗", vehicle_use, vehicle_check, format_vehicle_clean); return ConversationHandler.END
+    await _do_batch(update, context, vehicle_api, rcs, "🚗", vehicle_use, vehicle_check); return ConversationHandler.END
 
 # IFSC Handlers
 async def ifsc_ss(u, c):
@@ -1032,7 +985,7 @@ async def ifsc_ss(u, c):
 async def ifsc_sp(update, context):
     code = update.message.text.strip().upper().replace(" ", "")
     if not valid_ifsc(code): await safe_reply(update, "❌ Valid 11-digit IFSC code daalo! (e.g. SBIN0001234)\n/cancel"); return IFSC_SINGLE
-    await _do_single(update, context, ifsc_api, code, code, "🏦", ifsc_use, ifsc_check, format_ifsc_clean); return ConversationHandler.END
+    await _do_single(update, context, ifsc_api, code, code, "🏦", ifsc_use, ifsc_check); return ConversationHandler.END
 
 async def ifsc_bs(u, c):
     q = u.callback_query; await q.answer()
@@ -1045,7 +998,7 @@ async def ifsc_bs(u, c):
 async def ifsc_bp(update, context):
     codes = [c.strip().upper().replace(" ", "") for c in update.message.text.split(",") if valid_ifsc(c.strip().upper().replace(" ", ""))][:15]
     if not codes: await safe_reply(update, "❌ No valid IFSC codes!\n/cancel"); return IFSC_BATCH
-    await _do_batch(update, context, ifsc_api, codes, "🏦", ifsc_use, ifsc_check, format_ifsc_clean); return ConversationHandler.END
+    await _do_batch(update, context, ifsc_api, codes, "🏦", ifsc_use, ifsc_check); return ConversationHandler.END
 
 # Cancel
 async def cancel(u, c):
@@ -1282,7 +1235,7 @@ def main():
     ]:
         app.add_handler(CQ(f2, pattern=f"^{p}$"))
 
-    print("🤖 Bot Running! Metadata 100% Blocked & UPI Formatted.")
+    print("🤖 Bot Running! Metadata Blocked & Fast Clean Output.")
     app.run_polling(drop_pending_updates=True, allowed_updates=["message", "callback_query"])
 
 if __name__ == "__main__":
