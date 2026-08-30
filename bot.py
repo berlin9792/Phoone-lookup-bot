@@ -3,10 +3,11 @@
 🔍 Ultimate Intelligence Bot
 Phone + Email + UPI + Aadhaar + Vehicle + IFSC
 ONE PLAN = ALL ACCESS
-+ Force Join + Broadcast + Custom Plan + MongoDB Cloud (High Speed Non-Blocking)
++ Clean API Response (Metadata Hidden)
++ In-Memory Cache + MongoDB Cloud + 24/7 Keep Alive
 """
 
-import json, os, threading, requests, logging, asyncio
+import json, os, threading, requests, logging
 from datetime import date, timedelta
 from pathlib import Path
 from flask import Flask
@@ -35,9 +36,8 @@ NITIN_API_KEY   = "JAANI"
 VEHICLE_API_KEY = "ansh"
 IFSC_API_KEY    = "NITIN"
 OWNER_CONTACT   = "@theplayerror"
-
-FORCE_JOIN_CHANNEL    = "@hackkwr"
-FORCE_JOIN_CHANNEL_ID = "@hackkwr"
+CHANNEL_LINK    = "https://t.me/hackkwr"
+CHANNEL_USERNAME = "@hackkwr"
 
 MONGO_URI = os.environ.get(
     "MONGO_URI",
@@ -74,6 +74,46 @@ AADHAAR_SINGLE=50; AADHAAR_BATCH=51
 VEHICLE_SINGLE=60; VEHICLE_BATCH=61
 IFSC_SINGLE=70; IFSC_BATCH=71
 
+# ================== SAFE SENDERS ==================
+async def safe_reply(update: Update, text: str, reply_markup=None):
+    try:
+        if update.message:
+            return await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+        elif update.callback_query and update.callback_query.message:
+            return await update.callback_query.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+    except Exception:
+        clean = text.replace("*", "").replace("`", "").replace("_", "").replace("[", "").replace("]", "")
+        try:
+            if update.message:
+                return await update.message.reply_text(clean, reply_markup=reply_markup)
+            elif update.callback_query and update.callback_query.message:
+                return await update.callback_query.message.reply_text(clean, reply_markup=reply_markup)
+        except Exception:
+            pass
+
+async def safe_edit(query, text: str, reply_markup=None):
+    try:
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+    except Exception:
+        clean = text.replace("*", "").replace("`", "").replace("_", "").replace("[", "").replace("]", "")
+        try:
+            await query.edit_message_text(clean, reply_markup=reply_markup)
+        except Exception:
+            pass
+
+def is_admin(uid): return int(uid) in ADMIN_IDS
+
+def safe_name(user):
+    name = user.first_name or "User"
+    for ch in ["*", "_", "`", "[", "]", "(", ")"]:
+        name = name.replace(ch, "")
+    return name
+
+def valid_email(e): return "@" in e and "." in e.split("@")[-1] and " " not in e
+def valid_upi(u): return "@" in u and len(u) >= 5 and " " not in u
+def valid_aadhaar(a): return a.isdigit() and len(a) == 12
+def valid_ifsc(c): return len(c) == 11 and c[:4].isalpha() and c[4] == "0"
+
 # ================== FLASK KEEP-ALIVE ==================
 web_app = Flask(__name__)
 @web_app.route('/')
@@ -83,7 +123,7 @@ def start_webserver():
     logging.getLogger('werkzeug').setLevel(logging.ERROR)
     web_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
 
-# ================== IN-MEMORY FAST CACHE + MONGODB ==================
+# ================== IN-MEMORY CACHE + MONGODB ==================
 USERS_CACHE = {}
 LOCAL_FILE = Path("users.json")
 
@@ -92,9 +132,9 @@ try:
     db = mc["tele_intel_bot"]
     users_col = db["users"]
     mc.admin.command('ping')
-    print("✅ Successfully connected to MongoDB Cloud Database!")
+    print("✅ MongoDB Connected!")
 except Exception as e:
-    print("⚠️ MongoDB Connection warning:", e)
+    print("⚠️ MongoDB Warning:", e)
     users_col = None
 
 DEFAULTS = {
@@ -115,21 +155,18 @@ def init_cache():
             for doc in users_col.find():
                 uid = doc["_id"]
                 USERS_CACHE[uid] = {k: v for k, v in doc.items() if k != "_id"}
-            print(f"📦 Loaded {len(USERS_CACHE)} users from Cloud DB into cache.")
             return
-        except Exception as e:
-            logger.error(f"Error loading from MongoDB: {e}")
+        except Exception:
+            pass
     if LOCAL_FILE.exists():
         try:
             USERS_CACHE = json.loads(LOCAL_FILE.read_text())
-            print(f"📦 Loaded {len(USERS_CACHE)} users from local file.")
         except Exception:
             USERS_CACHE = {}
 
 init_cache()
 
 def sync_user_background(uid: str, data: dict):
-    """Background thread to save data to Mongo without blocking the bot"""
     def _save():
         if users_col is not None:
             try:
@@ -137,10 +174,8 @@ def sync_user_background(uid: str, data: dict):
                 return
             except Exception:
                 pass
-        try:
-            LOCAL_FILE.write_text(json.dumps(USERS_CACHE, indent=2))
-        except Exception:
-            pass
+        try: LOCAL_FILE.write_text(json.dumps(USERS_CACHE, indent=2))
+        except Exception: pass
     threading.Thread(target=_save, daemon=True).start()
 
 def get_user(uid):
@@ -179,59 +214,6 @@ def delete_user(uid):
 
 def load_users():
     return USERS_CACHE
-
-# ================== SAFE MESSAGE SENDERS ==================
-async def safe_reply(update: Update, text: str, reply_markup=None):
-    """Guaranteed reply without failing on Telegram formatting errors"""
-    try:
-        if update.message:
-            return await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
-        elif update.callback_query and update.callback_query.message:
-            return await update.callback_query.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
-    except Exception:
-        clean = text.replace("*", "").replace("`", "").replace("_", "").replace("[", "").replace("]", "")
-        try:
-            if update.message:
-                return await update.message.reply_text(clean, reply_markup=reply_markup)
-            elif update.callback_query and update.callback_query.message:
-                return await update.callback_query.message.reply_text(clean, reply_markup=reply_markup)
-        except Exception as err:
-            logger.error(f"safe_reply failed: {err}")
-
-async def safe_edit(query, text: str, reply_markup=None):
-    """Guaranteed edit without failing on Telegram formatting errors"""
-    try:
-        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
-    except Exception:
-        clean = text.replace("*", "").replace("`", "").replace("_", "").replace("[", "").replace("]", "")
-        try:
-            await query.edit_message_text(clean, reply_markup=reply_markup)
-        except Exception as err:
-            logger.error(f"safe_edit failed: {err}")
-
-def is_admin(uid): return int(uid) in ADMIN_IDS
-
-def safe_name(user):
-    name = user.first_name or "User"
-    for ch in ["*", "_", "`", "[", "]", "(", ")"]:
-        name = name.replace(ch, "")
-    return name
-
-# ================== FORCE JOIN ==================
-async def check_joined(context, uid):
-    if is_admin(uid): return True
-    try:
-        m = await asyncio.wait_for(context.bot.get_chat_member(FORCE_JOIN_CHANNEL_ID, uid), timeout=3.0)
-        return m.status in ["member", "administrator", "creator"]
-    except Exception as e:
-        logger.warning(f"Force join check warning: {e}")
-        return False
-
-def force_join_kb():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📢 Join Channel", url=f"https://t.me/{FORCE_JOIN_CHANNEL.replace('@','')}")],
-        [InlineKeyboardButton("✅ I Joined — Verify", callback_data="verify_join")],
-    ])
 
 # ================== PLAN RESOLVER & UPGRADES ==================
 def get_plan(ud):
@@ -294,7 +276,7 @@ def check_access(uid, fk, mx, dk, dtk, name):
             unl = plan.get("unlimited", False)
             if unl: return True, f"{plan['name']} | Unlimited | {days_left}d left", days_left, True, pk
             if dr <= 0: return False, f"Daily {name} limit khatam! ({lim}/day)", days_left, True, pk
-            return True, f"{plan['name']} | {dr}/{lim} today | {days_left}d left", days_left, True, pk
+            return True, f"{plan['name']}|{dr}/{lim} today|{days_left}d left", days_left, True, pk
         except Exception:
             pass
     fl = free_rem(uid, fk, mx)
@@ -353,12 +335,12 @@ def ifsc_check(u): return check_access(u, "ifsc_free_used", IFSC_FREE, "ifsc_dai
 def _safe_api(fn):
     try: return fn()
     except requests.exceptions.Timeout:
-        return {"ok": False, "error": "⏱️ Request timed out. Try again."}
+        return {"ok": False, "error": "⏱️ Request timed out. Please try again."}
     except requests.exceptions.ConnectionError:
-        return {"ok": False, "error": "🌐 Connection error. Service unavailable."}
+        return {"ok": False, "error": "🌐 Service connection error. Please try later."}
     except requests.exceptions.HTTPError as e:
         code = e.response.status_code if e.response else "Error"
-        return {"ok": False, "error": f"⚠️ Server returned error: {code}"}
+        return {"ok": False, "error": f"⚠️ Service error response: {code}"}
     except Exception:
         return {"ok": False, "error": "❌ Service temporarily unavailable."}
 
@@ -392,15 +374,18 @@ def ifsc_api(code):
         r.raise_for_status(); return {"ok": True, "data": r.json()}
     return _safe_api(call)
 
-# ================== FORMATTERS ==================
-SKIP_K = {"timestamp","response_time","response_time_ms","developer","owner","credit","credits","powered_by","source","api","version","status","message","code","time","created_at","updated_at","server","watermark","signature","by","made_by","contact","channel","group","join","advertisement","ads","promo","query"}
+# ================== METADATA SKIP LIST ==================
+SKIP_K = {
+    "timestamp","response_time","response_time_ms","developer","owner","credit","credits","powered_by","source","api","version","status","message","code","time","created_at","updated_at","server","watermark","signature","by","made_by","contact","channel","group","join","advertisement","ads","promo","query",
+    "key_usage", "key_expiry", "key_enabled", "daily_limit", "daily_used", "key", "api_key", "action", "parameters", "service", "success", "violations"
+}
 SKIP_E = {"EncryptedPassword","encrypted_password","Salt","salt","PinCode","pin_code","CreditsInappPoints","IP","ip","TheDateOfTheEntrance"}
 
 def sk(k):
     if k in SKIP_E: return True
-    kl = k.lower().strip()
+    kl = str(k).lower().strip()
     if kl in SKIP_K: return True
-    for w in ["timestamp","response","developer","owner","credit","powered","source","version","watermark","pheevar","advertisement","promo","channel","server","api_","made_by","encrypted","password","salt"]:
+    for w in ["timestamp","response","developer","owner","credit","powered","source","version","watermark","pheevar","advertisement","promo","channel","server","api_","made_by","encrypted","password","salt","key_","daily_"]:
         if w in kl: return True
     return False
 
@@ -413,8 +398,8 @@ def sv(v):
     return False
 
 def em(k):
-    k = k.lower()
-    for kw, e in {"name":"👤","email":"📧","phone":"📞","mobile":"📞","address":"📍","city":"🏙️","state":"🗺️","country":"🌍","pincode":"📮","upi":"💳","vpa":"💳","bank":"🏦","ifsc":"🏦","account":"🏦","dob":"🎂","gender":"🚻","pan":"🪪","aadhar":"🪪","aadhaar":"🪪","father":"👨","mother":"👩","vehicle":"🚗","rc":"🚗","owner":"👤","model":"🚗","fuel":"⛽","engine":"🔧","chassis":"🔧","registration":"📅","insurance":"📋","branch":"🏦","district":"🗺️","micr":"🔢","swift":"🔢","verified":"✅","valid":"✅"}.items():
+    k = str(k).lower()
+    for kw, e in {"name":"👤","holder":"👤","email":"📧","phone":"📞","mobile":"📞","address":"📍","city":"🏙️","state":"🗺️","country":"🌍","pincode":"📮","upi":"💳","vpa":"💳","bank":"🏦","ifsc":"🏦","account":"🏦","dob":"🎂","gender":"🚻","pan":"🪪","aadhar":"🪪","aadhaar":"🪪","father":"👨","mother":"👩","vehicle":"🚗","rc":"🚗","owner":"👤","model":"🚗","fuel":"⛽","engine":"🔧","chassis":"🔧","registration":"📅","insurance":"📋","branch":"🏦","district":"🗺️","micr":"🔢","swift":"🔢","verified":"✅","valid":"✅","merchant":"🏪"}.items():
         if kw in k: return e
     return "📌"
 
@@ -425,13 +410,13 @@ def fmt_rec(rec):
         if isinstance(v, dict):
             for a, b in v.items():
                 if sk(a) or sv(b): continue
-                lines.append(f"{em(a.lower())} *{a.replace('_',' ').title()}*: `{b}`")
+                lines.append(f"{em(a)} *{a.replace('_',' ').title()}*: `{b}`")
             continue
         if isinstance(v, list):
             cl = [str(i) for i in v if not sv(i)]
-            if cl: lines.append(f"{em(k.lower())} *{k.replace('_',' ').title()}*: `{', '.join(cl)}`")
+            if cl: lines.append(f"{em(k)} *{k.replace('_',' ').title()}*: `{', '.join(cl)}`")
             continue
-        lines.append(f"{em(k.lower())} *{k.replace('_',' ').title()}*: `{v}`")
+        lines.append(f"{em(k)} *{k.replace('_',' ').title()}*: `{v}`")
     return lines
 
 def fmt(term, data, icon="🔍"):
@@ -468,21 +453,110 @@ def fmt(term, data, icon="🔍"):
         ls = fmt_rec(r); out.extend(ls if ls else ["_No data_"])
     return "\n".join(out)
 
+# ✅ SPECIFIC CLEAN UPI FORMATTER (HIDES METADATA COMPLETELY)
+def format_upi_clean(upi_id, raw_data):
+    if not raw_data or not isinstance(raw_data, dict):
+        return f"💳 *UPI ID:* `{upi_id}`\n_No data found_"
+
+    # Dig into response -> data payload
+    resp = raw_data.get("response", raw_data)
+    record = {}
+
+    if isinstance(resp, dict):
+        d_val = resp.get("data", resp)
+        if isinstance(d_val, list) and len(d_val) > 0:
+            record = d_val[0]
+        elif isinstance(d_val, dict):
+            record = d_val
+        else:
+            record = resp
+    elif isinstance(resp, list) and len(resp) > 0:
+        record = resp[0]
+    else:
+        record = raw_data
+
+    div = "━" * 28
+    lines = [
+        "💳 *UPI Verification Details*",
+        div,
+        f"🆔 *UPI ID:* `{upi_id}`"
+    ]
+
+    # Explicit mapped fields in priority order
+    field_order = [
+        ("account_holder_name", "👤", "Account Holder"),
+        ("name", "👤", "Account Holder"),
+        ("payee_name", "👤", "Payee Name"),
+        ("vpa", "💳", "VPA"),
+        ("valid", "✅", "Status"),
+        ("merchant", "🏪", "Merchant"),
+        ("merchant_verified", "🛡️", "Merchant Verified"),
+        ("account_type", "🔖", "Account Type"),
+        ("bank_id", "🏦", "Bank ID"),
+        ("bank_name", "🏦", "Bank Name"),
+        ("ifsc", "🏦", "IFSC Code"),
+    ]
+
+    handled_keys = set()
+    found_any = False
+
+    for k, icon, label in field_order:
+        if k in record:
+            val = record[k]
+            handled_keys.add(k)
+            if sv(val): continue
+            
+            if k == "valid":
+                val_str = "Verified & Active ✅" if (val is True or str(val).lower() == "true") else "Invalid / Inactive ❌"
+            elif k == "merchant_verified":
+                val_str = "Yes ✅" if (val is True or str(val).lower() == "true") else "No"
+            elif isinstance(val, bool):
+                val_str = "Yes" if val else "No"
+            else:
+                val_str = str(val).strip().title()
+                
+            lines.append(f"{icon} *{label}:* `{val_str}`")
+            found_any = True
+
+    # Any remaining non-metadata fields
+    for k, v in record.items():
+        if k in handled_keys or sk(k) or sv(v):
+            continue
+        lines.append(f"{em(k)} *{k.replace('_', ' ').title()}:* `{v}`")
+        found_any = True
+
+    if not found_any:
+        lines.append("_No verification details available_")
+
+    lines.append(div)
+    return "\n".join(lines)
+
 def fmt_special(title, icon, id_label, search_id, data):
     if not data: return f"{icon} *{search_id}*\n_No data found_"
     if not isinstance(data, dict): return f"{icon} *{search_id}*\n`{data}`"
+    
+    # Strip nested response/data if present
+    content = data.get("response", data)
+    if isinstance(content, dict) and "data" in content:
+        content = content["data"]
+        if isinstance(content, list) and len(content) > 0:
+            content = content[0]
+            
     div = "━" * 28
     lines = [f"{icon} *{title}*", div, f"🆔 *{id_label}:* `{search_id}`"]
     found = False
-    for k, v in data.items():
-        if sk(k) or sv(v): continue
-        if isinstance(v, dict):
-            for a, b in v.items():
-                if sk(a) or sv(b): continue
-                lines.append(f"{em(a.lower())} *{a.replace('_',' ').title()}*: `{b}`"); found = True
-            continue
-        lines.append(f"{em(k.lower())} *{k.replace('_',' ').title()}*: `{v}`"); found = True
-    if not found: lines.append("_No relevant data_")
+    
+    if isinstance(content, dict):
+        for k, v in content.items():
+            if sk(k) or sv(v): continue
+            if isinstance(v, dict):
+                for a, b in v.items():
+                    if sk(a) or sv(b): continue
+                    lines.append(f"{em(a)} *{a.replace('_',' ').title()}*: `{b}`"); found = True
+                continue
+            lines.append(f"{em(k)} *{k.replace('_',' ').title()}*: `{v}`"); found = True
+            
+    if not found: lines.append("_No relevant data found_")
     lines.append(div); return "\n".join(lines)
 
 # ================== KEYBOARDS ==================
@@ -492,7 +566,8 @@ def main_kb(uid):
         [InlineKeyboardButton("💳 UPI", callback_data="mode_upi"), InlineKeyboardButton("🪪 Aadhaar", callback_data="mode_aadhaar")],
         [InlineKeyboardButton("🚗 Vehicle RC", callback_data="mode_vehicle"), InlineKeyboardButton("🏦 IFSC", callback_data="mode_ifsc")],
         [InlineKeyboardButton("👤 Profile", callback_data="profile"), InlineKeyboardButton("📊 Status", callback_data="status")],
-        [InlineKeyboardButton("💰 Buy Plan", callback_data="buy"), InlineKeyboardButton("❓ Help", callback_data="help")],
+        [InlineKeyboardButton("📢 Official Channel", url=CHANNEL_LINK), InlineKeyboardButton("💰 Buy Plan", callback_data="buy")],
+        [InlineKeyboardButton("❓ Help Guide", callback_data="help")],
     ])
 
 def search_kb(uid, check_fn, free_fn, daily_fn, prefix, mx):
@@ -558,33 +633,11 @@ def monitor_kb():
         [InlineKeyboardButton("🔙 Admin Menu", callback_data="admin_back")],
     ])
 
-def valid_email(e): return "@" in e and "." in e.split("@")[-1] and " " not in e
-def valid_upi(u): return "@" in u and len(u) >= 5 and " " not in u
-def valid_aadhaar(a): return a.isdigit() and len(a) == 12
-def valid_ifsc(c): return len(c) == 11 and c[:4].isalpha() and c[4] == "0"
-
-# ================== START & VERIFY ==================
+# ================== START ==================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     get_user(user.id)
     u_name = safe_name(user)
-
-    if not is_admin(user.id):
-        joined = await check_joined(context, user.id)
-        if not joined:
-            d1 = "━" * 30
-            text = (
-                f"{d1}\n  🔍 *Ultimate Intelligence Bot*\n{d1}\n\n"
-                f"👋 Welcome *{u_name}*!\n\n"
-                "⚠️ *Bot use karne ke liye channel join karo:*\n"
-                f"📢 Channel: {FORCE_JOIN_CHANNEL}\n\n"
-                "Join karke niche ✅ Verify button dabao 👇"
-            )
-            if update.callback_query:
-                await safe_edit(update.callback_query, text, force_join_kb())
-            else:
-                await safe_reply(update, text, force_join_kb())
-            return ConversationHandler.END
 
     d1, d2 = "━" * 30, "━" * 25
     if is_admin(user.id):
@@ -592,6 +645,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"{d1}\n  🔍 *Ultimate Intelligence Bot*\n{d1}\n\n"
             f"👋 Welcome *{u_name}*! 🛡️ *Admin*\n\n"
             f"{d2}\n📱 Phone  : ∞ Unlimited\n📧 Email  : ∞ Unlimited\n💳 UPI    : ∞ Unlimited\n🪪 Aadhaar: ∞ Unlimited\n🚗 Vehicle: ∞ Unlimited\n🏦 IFSC   : ∞ Unlimited\n{d2}\n\n"
+            f"📢 *Official Channel:* {CHANNEL_USERNAME}\n\n"
             "Choose search type below 👇"
         )
     else:
@@ -622,6 +676,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"{d1}\n  🔍 *Ultimate Intelligence Bot*\n{d1}\n\n"
             f"👋 Welcome *{u_name}*!\n\n"
             f"{d2}\n" + "\n".join(lines) + f"\n{d2}\n\n"
+            f"📢 *Join for Updates:* {CHANNEL_USERNAME}\n"
             "💡 *Ek plan se saare 6 features unlock!*\n\n"
             f"{d1}\nChoose search type below 👇"
         )
@@ -632,26 +687,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await safe_reply(update, text, main_kb(user.id))
     return ConversationHandler.END
 
-async def verify_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query; await q.answer()
-    if await check_joined(context, q.from_user.id):
-        await safe_edit(q, "✅ *Channel Join Verified!*\n\nBot start ho raha hai... 🎉")
-        await start(update, context)
-    else:
-        await safe_edit(
-            q,
-            f"❌ *Aapne abhi channel join nahi kiya!*\n\n"
-            f"📢 Pehle join karo: {FORCE_JOIN_CHANNEL}\n\n"
-            "Phir niche ✅ Verify button dabao 👇",
-            force_join_kb()
-        )
-
 # ================== MODES ==================
 async def _mode(update, context, title, icon, chk, ff, df, mx, mkb):
     q = update.callback_query; await q.answer(); u = q.from_user
-    if not is_admin(u.id) and not await check_joined(context, u.id):
-        await safe_edit(q, f"⚠️ *Channel join karo:*\n📢 {FORCE_JOIN_CHANNEL}", force_join_kb())
-        return
     if is_admin(u.id): info = "🛡️ Admin — Unlimited"
     else:
         ok, _, _, ip, _ = chk(u.id)
@@ -663,9 +701,6 @@ async def _mode(update, context, title, icon, chk, ff, df, mx, mkb):
 async def mode_phone(u,c): await _mode(u,c,"Phone Search","📱",phone_check,phone_free,phone_daily,PHONE_FREE,lambda uid:search_kb(uid,phone_check,phone_free,phone_daily,"phone",PHONE_FREE))
 async def mode_email(update, context):
     q = update.callback_query; await q.answer(); u = q.from_user
-    if not is_admin(u.id) and not await check_joined(context, u.id):
-        await safe_edit(q, f"⚠️ *Channel join karo:*\n📢 {FORCE_JOIN_CHANNEL}", force_join_kb())
-        return
     if is_admin(u.id): info = "🛡️ Admin — Unlimited"
     else:
         ok, _, d, ip = email_check(u.id); fl = email_free(u.id)
@@ -762,19 +797,15 @@ async def _do_batch(update, context, api_fn, items, icon, use_fn, chk, fmt_fn=No
     if msg: await msg.edit_text(f"✅ *Batch Complete!* Processed: {total}", reply_markup=main_kb(u.id), parse_mode="Markdown")
     else: await safe_reply(update, f"✅ *Batch Complete!* Processed: {total}", main_kb(u.id))
 
-# Phone
+# Phone Handlers
 async def phone_single_s2(u, c):
     q = u.callback_query; await q.answer()
-    if not is_admin(q.from_user.id) and not await check_joined(c, q.from_user.id):
-        await safe_edit(q, f"⚠️ *Join:* {FORCE_JOIN_CHANNEL}", force_join_kb()); return ConversationHandler.END
     ok, st, _, _, _ = phone_check(q.from_user.id)
     if not ok: await safe_edit(q, f"🔒 {st}\n💰 {OWNER_CONTACT}", buy_kb()); return ConversationHandler.END
     await safe_edit(q, "📱 Country select karo:", country_kb("single")); return PHONE_COUNTRY_SINGLE
 
 async def phone_batch_s2(u, c):
     q = u.callback_query; await q.answer()
-    if not is_admin(q.from_user.id) and not await check_joined(c, q.from_user.id):
-        await safe_edit(q, f"⚠️ *Join:* {FORCE_JOIN_CHANNEL}", force_join_kb()); return ConversationHandler.END
     ok, st, _, _, _ = phone_check(q.from_user.id)
     if not ok: await safe_edit(q, f"🔒 {st}\n💰 {OWNER_CONTACT}", buy_kb()); return ConversationHandler.END
     await safe_edit(q, "📦 Country select karo:", country_kb("batch")); return PHONE_COUNTRY_BATCH
@@ -817,11 +848,9 @@ async def pbo(update, context):
     if not valid: await safe_reply(update, "❌ Koi valid number nahi!\n/cancel"); return PHONE_BATCH_OTHER
     await _do_batch(update, context, search_api, valid[:15], "📱", phone_use, phone_check); return ConversationHandler.END
 
-# Email
+# Email Handlers
 async def email_ss(u, c):
     q = u.callback_query; await q.answer()
-    if not is_admin(q.from_user.id) and not await check_joined(c, q.from_user.id):
-        await safe_edit(q, f"⚠️ *Join:* {FORCE_JOIN_CHANNEL}", force_join_kb()); return ConversationHandler.END
     ok, st, _, _ = email_check(q.from_user.id)
     if not ok: await safe_edit(q, f"🔒 {st}\n💰 {OWNER_CONTACT}", buy_kb()); return ConversationHandler.END
     await safe_edit(q, "📧 *Email address daalo:*\n_Example: user@gmail.com_\n\n/cancel to go back"); return EMAIL_SINGLE
@@ -844,8 +873,6 @@ async def email_sp(update, context):
 
 async def email_bs(u, c):
     q = u.callback_query; await q.answer()
-    if not is_admin(q.from_user.id) and not await check_joined(c, q.from_user.id):
-        await safe_edit(q, f"⚠️ *Join:* {FORCE_JOIN_CHANNEL}", force_join_kb()); return ConversationHandler.END
     ok, st, _, _ = email_check(q.from_user.id)
     if not ok: await safe_edit(q, f"🔒 {st}", buy_kb()); return ConversationHandler.END
     await safe_edit(q, "📦 *Emails comma se daalo (Max 15):*\n\n/cancel to go back"); return EMAIL_BATCH
@@ -866,24 +893,20 @@ async def email_bp(update, context):
     else: await safe_reply(update, f"✅ *Done!* Processed: {len(emails)}", main_kb(u.id))
     return ConversationHandler.END
 
-# UPI
+# UPI Handlers
 async def upi_ss(u, c):
     q = u.callback_query; await q.answer()
-    if not is_admin(q.from_user.id) and not await check_joined(c, q.from_user.id):
-        await safe_edit(q, f"⚠️ *Join:* {FORCE_JOIN_CHANNEL}", force_join_kb()); return ConversationHandler.END
     ok, st, _, _, _ = upi_check(q.from_user.id)
     if not ok: await safe_edit(q, f"🔒 {st}\n💰 {OWNER_CONTACT}", buy_kb()); return ConversationHandler.END
-    await safe_edit(q, "💳 *UPI ID daalo:*\n✅ `ansh@paytm`\n✅ `9876543210@ybl`\n\n/cancel to go back"); return UPI_SINGLE
+    await safe_edit(q, "💳 *UPI ID daalo:*\n✅ `ayush97@fam`\n✅ `9876543210@ybl`\n\n/cancel to go back"); return UPI_SINGLE
 
 async def upi_sp(update, context):
     uid = update.message.text.strip()
     if not valid_upi(uid): await safe_reply(update, "❌ Format: `name@bank`\n/cancel"); return UPI_SINGLE
-    await _do_single(update, context, upi_api, uid, uid, "💳", upi_use, upi_check, lambda t, d: fmt_special("UPI Lookup", "💳", "UPI ID", t, d)); return ConversationHandler.END
+    await _do_single(update, context, upi_api, uid, uid, "💳", upi_use, upi_check, format_upi_clean); return ConversationHandler.END
 
 async def upi_bs(u, c):
     q = u.callback_query; await q.answer()
-    if not is_admin(q.from_user.id) and not await check_joined(c, q.from_user.id):
-        await safe_edit(q, f"⚠️ *Join:* {FORCE_JOIN_CHANNEL}", force_join_kb()); return ConversationHandler.END
     ok, st, _, _, _ = upi_check(q.from_user.id)
     if not ok: await safe_edit(q, f"🔒 {st}", buy_kb()); return ConversationHandler.END
     await safe_edit(q, "📦 *UPI IDs comma se daalo (Max 15):*\n\n/cancel to go back"); return UPI_BATCH
@@ -891,13 +914,11 @@ async def upi_bs(u, c):
 async def upi_bp(update, context):
     upis = [u.strip() for u in update.message.text.split(",") if valid_upi(u.strip())][:15]
     if not upis: await safe_reply(update, "❌ No valid UPI IDs!\n/cancel"); return UPI_BATCH
-    await _do_batch(update, context, upi_api, upis, "💳", upi_use, upi_check, lambda t, d: fmt_special("UPI", "💳", "UPI", t, d)); return ConversationHandler.END
+    await _do_batch(update, context, upi_api, upis, "💳", upi_use, upi_check, format_upi_clean); return ConversationHandler.END
 
-# Aadhaar
+# Aadhaar Handlers
 async def aadh_ss(u, c):
     q = u.callback_query; await q.answer()
-    if not is_admin(q.from_user.id) and not await check_joined(c, q.from_user.id):
-        await safe_edit(q, f"⚠️ *Join:* {FORCE_JOIN_CHANNEL}", force_join_kb()); return ConversationHandler.END
     ok, st, _, _, _ = aadhaar_check(q.from_user.id)
     if not ok: await safe_edit(q, f"🔒 {st}\n💰 {OWNER_CONTACT}", buy_kb()); return ConversationHandler.END
     await safe_edit(q, "🪪 *12 digit Aadhaar number daalo:*\n✅ `327567544017`\n\n/cancel to go back"); return AADHAAR_SINGLE
@@ -909,8 +930,6 @@ async def aadh_sp(update, context):
 
 async def aadh_bs(u, c):
     q = u.callback_query; await q.answer()
-    if not is_admin(q.from_user.id) and not await check_joined(c, q.from_user.id):
-        await safe_edit(q, f"⚠️ *Join:* {FORCE_JOIN_CHANNEL}", force_join_kb()); return ConversationHandler.END
     ok, st, _, _, _ = aadhaar_check(q.from_user.id)
     if not ok: await safe_edit(q, f"🔒 {st}", buy_kb()); return ConversationHandler.END
     await safe_edit(q, "📦 *Aadhaar numbers comma se daalo (Max 15):*\n\n/cancel to go back"); return AADHAAR_BATCH
@@ -920,11 +939,9 @@ async def aadh_bp(update, context):
     if not nums: await safe_reply(update, "❌ No valid Aadhaar numbers!\n/cancel"); return AADHAAR_BATCH
     await _do_batch(update, context, aadhaar_api, nums, "🪪", aadhaar_use, aadhaar_check, lambda t, d: fmt_special("Aadhaar", "🪪", "Aadhaar", t, d)); return ConversationHandler.END
 
-# Vehicle RC
+# Vehicle Handlers
 async def veh_ss(u, c):
     q = u.callback_query; await q.answer()
-    if not is_admin(q.from_user.id) and not await check_joined(c, q.from_user.id):
-        await safe_edit(q, f"⚠️ *Join:* {FORCE_JOIN_CHANNEL}", force_join_kb()); return ConversationHandler.END
     ok, st, _, _, _ = vehicle_check(q.from_user.id)
     if not ok: await safe_edit(q, f"🔒 {st}\n💰 {OWNER_CONTACT}", buy_kb()); return ConversationHandler.END
     await safe_edit(q, "🚗 *Vehicle Number daalo:*\n✅ `MH01AB1234`\n✅ `DL3CCE1234`\n\n/cancel to go back"); return VEHICLE_SINGLE
@@ -936,8 +953,6 @@ async def veh_sp(update, context):
 
 async def veh_bs(u, c):
     q = u.callback_query; await q.answer()
-    if not is_admin(q.from_user.id) and not await check_joined(c, q.from_user.id):
-        await safe_edit(q, f"⚠️ *Join:* {FORCE_JOIN_CHANNEL}", force_join_kb()); return ConversationHandler.END
     ok, st, _, _, _ = vehicle_check(q.from_user.id)
     if not ok: await safe_edit(q, f"🔒 {st}", buy_kb()); return ConversationHandler.END
     await safe_edit(q, "📦 *RC numbers comma se daalo (Max 15):*\n\n/cancel to go back"); return VEHICLE_BATCH
@@ -947,11 +962,9 @@ async def veh_bp(update, context):
     if not rcs: await safe_reply(update, "❌ No valid vehicle numbers!\n/cancel"); return VEHICLE_BATCH
     await _do_batch(update, context, vehicle_api, rcs, "🚗", vehicle_use, vehicle_check, lambda t, d: fmt_special("Vehicle", "🚗", "RC", t, d)); return ConversationHandler.END
 
-# IFSC
+# IFSC Handlers
 async def ifsc_ss(u, c):
     q = u.callback_query; await q.answer()
-    if not is_admin(q.from_user.id) and not await check_joined(c, q.from_user.id):
-        await safe_edit(q, f"⚠️ *Join:* {FORCE_JOIN_CHANNEL}", force_join_kb()); return ConversationHandler.END
     ok, st, _, _, _ = ifsc_check(q.from_user.id)
     if not ok: await safe_edit(q, f"🔒 {st}\n💰 {OWNER_CONTACT}", buy_kb()); return ConversationHandler.END
     await safe_edit(q, "🏦 *IFSC Code daalo:*\n✅ `SBIN0001234`\n✅ `HDFC0000001`\n\n/cancel to go back"); return IFSC_SINGLE
@@ -963,8 +976,6 @@ async def ifsc_sp(update, context):
 
 async def ifsc_bs(u, c):
     q = u.callback_query; await q.answer()
-    if not is_admin(q.from_user.id) and not await check_joined(c, q.from_user.id):
-        await safe_edit(q, f"⚠️ *Join:* {FORCE_JOIN_CHANNEL}", force_join_kb()); return ConversationHandler.END
     ok, st, _, _, _ = ifsc_check(q.from_user.id)
     if not ok: await safe_edit(q, f"🔒 {st}", buy_kb()); return ConversationHandler.END
     await safe_edit(q, "📦 *IFSC codes comma se daalo (Max 15):*\n\n/cancel to go back"); return IFSC_BATCH
@@ -1099,7 +1110,7 @@ async def mon_summary(u, c):
         if all(max(0, mx - info.get(k, 0)) <= 0 for k, mx in all_keys): ex += 1
     await safe_edit(q, f"📊 *Summary*\n\n👥 Total Free: {t}\n🔴 All Exhausted: {ex}\n📅 {date.today()}", monitor_kb())
 
-# Broadcast
+# Broadcast Handlers
 async def bc_start(u, c):
     q = u.callback_query
     if not is_admin(q.from_user.id): return ConversationHandler.END
@@ -1132,7 +1143,7 @@ async def bc_confirm(u, c):
     await safe_reply(u, f"✅ *Complete!*\n👥 Total: {total}\n✅ Sent: {s}\n🚫 Blocked: {b}\n❌ Failed: {f2}", admin_kb())
     c.user_data.pop("bc", None); return ConversationHandler.END
 
-# Custom Plan
+# Custom Plan Handlers
 async def custom_s(u, c):
     q = u.callback_query; await q.answer()
     await safe_edit(q, "⚙️ *Custom Plan*\n\nKitne din? (eg: 45)\n/cancel to abort"); return ADMIN_CUSTOM_DAYS
@@ -1156,7 +1167,7 @@ async def main_menu_cb(u, c): await start(u, c); return ConversationHandler.END
 
 # Error Handler
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    logger.error(f"❌ Exception while handling update: {context.error}")
+    logger.error(f"❌ Exception: {context.error}")
 
 # ================== MAIN ==================
 def main():
@@ -1169,24 +1180,25 @@ def main():
 
     C = ConversationHandler; CQ = CallbackQueryHandler; MH = MessageHandler; CMD = CommandHandler
     F = filters.TEXT & ~filters.COMMAND
+    UNIVERSAL_FALLBACKS = [CMD("cancel", cancel), CMD("start", start)]
 
     convs = [
-        C(entry_points=[CQ(phone_single_s2, pattern="^phone_single$")], states={PHONE_COUNTRY_SINGLE:[CQ(cs_single, pattern="^country_(india|other)_single$")], PHONE_SINGLE_INDIA:[MH(F, psi)], PHONE_SINGLE_OTHER:[MH(F, pso)]}, fallbacks=[CMD("cancel", cancel)], per_message=False, allow_reentry=True),
-        C(entry_points=[CQ(phone_batch_s2, pattern="^phone_batch$")], states={PHONE_COUNTRY_BATCH:[CQ(cs_batch, pattern="^country_(india|other)_batch$")], PHONE_BATCH_INDIA:[MH(F, pbi)], PHONE_BATCH_OTHER:[MH(F, pbo)]}, fallbacks=[CMD("cancel", cancel)], per_message=False, allow_reentry=True),
-        C(entry_points=[CQ(email_ss, pattern="^email_single$")], states={EMAIL_SINGLE:[MH(F, email_sp)]}, fallbacks=[CMD("cancel", cancel)], per_message=False, allow_reentry=True),
-        C(entry_points=[CQ(email_bs, pattern="^email_batch$")], states={EMAIL_BATCH:[MH(F, email_bp)]}, fallbacks=[CMD("cancel", cancel)], per_message=False, allow_reentry=True),
-        C(entry_points=[CQ(upi_ss, pattern="^upi_single$")], states={UPI_SINGLE:[MH(F, upi_sp)]}, fallbacks=[CMD("cancel", cancel)], per_message=False, allow_reentry=True),
-        C(entry_points=[CQ(upi_bs, pattern="^upi_batch$")], states={UPI_BATCH:[MH(F, upi_bp)]}, fallbacks=[CMD("cancel", cancel)], per_message=False, allow_reentry=True),
-        C(entry_points=[CQ(aadh_ss, pattern="^aadhaar_single$")], states={AADHAAR_SINGLE:[MH(F, aadh_sp)]}, fallbacks=[CMD("cancel", cancel)], per_message=False, allow_reentry=True),
-        C(entry_points=[CQ(aadh_bs, pattern="^aadhaar_batch$")], states={AADHAAR_BATCH:[MH(F, aadh_bp)]}, fallbacks=[CMD("cancel", cancel)], per_message=False, allow_reentry=True),
-        C(entry_points=[CQ(veh_ss, pattern="^vehicle_single$")], states={VEHICLE_SINGLE:[MH(F, veh_sp)]}, fallbacks=[CMD("cancel", cancel)], per_message=False, allow_reentry=True),
-        C(entry_points=[CQ(veh_bs, pattern="^vehicle_batch$")], states={VEHICLE_BATCH:[MH(F, veh_bp)]}, fallbacks=[CMD("cancel", cancel)], per_message=False, allow_reentry=True),
-        C(entry_points=[CQ(ifsc_ss, pattern="^ifsc_single$")], states={IFSC_SINGLE:[MH(F, ifsc_sp)]}, fallbacks=[CMD("cancel", cancel)], per_message=False, allow_reentry=True),
-        C(entry_points=[CQ(ifsc_bs, pattern="^ifsc_batch$")], states={IFSC_BATCH:[MH(F, ifsc_bp)]}, fallbacks=[CMD("cancel", cancel)], per_message=False, allow_reentry=True),
-        C(entry_points=[CQ(adm_add_s, pattern="^admin_add$")], states={ADMIN_ADD_ID:[MH(F, adm_add_id)], ADMIN_ADD_PLAN:[CQ(custom_s, pattern="^plan_custom$"), CQ(adm_add_plan, pattern="^plan_")], ADMIN_CUSTOM_DAYS:[MH(F, custom_days)], ADMIN_CUSTOM_LIMIT:[MH(F, custom_limit)]}, fallbacks=[CMD("cancel", cancel)], per_message=False, allow_reentry=True),
-        C(entry_points=[CQ(adm_rem_s, pattern="^admin_remove$")], states={ADMIN_REM_ID:[MH(F, adm_rem_p)]}, fallbacks=[CMD("cancel", cancel)], per_message=False, allow_reentry=True),
-        C(entry_points=[CQ(adm_sp_s, pattern="^admin_setplan$")], states={ADMIN_EXP_ID:[MH(F, adm_sp_id)], ADMIN_EXP_PLAN:[CQ(custom_s, pattern="^plan_custom$"), CQ(adm_sp_set, pattern="^plan_")], ADMIN_CUSTOM_DAYS:[MH(F, custom_days)], ADMIN_CUSTOM_LIMIT:[MH(F, custom_limit)]}, fallbacks=[CMD("cancel", cancel)], per_message=False, allow_reentry=True),
-        C(entry_points=[CQ(bc_start, pattern="^admin_broadcast$")], states={ADMIN_BROADCAST_MSG:[MH(F, bc_msg)], ADMIN_BROADCAST_CONFIRM:[CQ(bc_confirm, pattern="^broadcast_(confirm|cancel)$")]}, fallbacks=[CMD("cancel", cancel)], per_message=False, allow_reentry=True),
+        C(entry_points=[CQ(phone_single_s2, pattern="^phone_single$")], states={PHONE_COUNTRY_SINGLE:[CQ(cs_single, pattern="^country_(india|other)_single$")], PHONE_SINGLE_INDIA:[MH(F, psi)], PHONE_SINGLE_OTHER:[MH(F, pso)]}, fallbacks=UNIVERSAL_FALLBACKS, per_message=False, allow_reentry=True),
+        C(entry_points=[CQ(phone_batch_s2, pattern="^phone_batch$")], states={PHONE_COUNTRY_BATCH:[CQ(cs_batch, pattern="^country_(india|other)_batch$")], PHONE_BATCH_INDIA:[MH(F, pbi)], PHONE_BATCH_OTHER:[MH(F, pbo)]}, fallbacks=UNIVERSAL_FALLBACKS, per_message=False, allow_reentry=True),
+        C(entry_points=[CQ(email_ss, pattern="^email_single$")], states={EMAIL_SINGLE:[MH(F, email_sp)]}, fallbacks=UNIVERSAL_FALLBACKS, per_message=False, allow_reentry=True),
+        C(entry_points=[CQ(email_bs, pattern="^email_batch$")], states={EMAIL_BATCH:[MH(F, email_bp)]}, fallbacks=UNIVERSAL_FALLBACKS, per_message=False, allow_reentry=True),
+        C(entry_points=[CQ(upi_ss, pattern="^upi_single$")], states={UPI_SINGLE:[MH(F, upi_sp)]}, fallbacks=UNIVERSAL_FALLBACKS, per_message=False, allow_reentry=True),
+        C(entry_points=[CQ(upi_bs, pattern="^upi_batch$")], states={UPI_BATCH:[MH(F, upi_bp)]}, fallbacks=UNIVERSAL_FALLBACKS, per_message=False, allow_reentry=True),
+        C(entry_points=[CQ(aadh_ss, pattern="^aadhaar_single$")], states={AADHAAR_SINGLE:[MH(F, aadh_sp)]}, fallbacks=UNIVERSAL_FALLBACKS, per_message=False, allow_reentry=True),
+        C(entry_points=[CQ(aadh_bs, pattern="^aadhaar_batch$")], states={AADHAAR_BATCH:[MH(F, aadh_bp)]}, fallbacks=UNIVERSAL_FALLBACKS, per_message=False, allow_reentry=True),
+        C(entry_points=[CQ(veh_ss, pattern="^vehicle_single$")], states={VEHICLE_SINGLE:[MH(F, veh_sp)]}, fallbacks=UNIVERSAL_FALLBACKS, per_message=False, allow_reentry=True),
+        C(entry_points=[CQ(veh_bs, pattern="^vehicle_batch$")], states={VEHICLE_BATCH:[MH(F, veh_bp)]}, fallbacks=UNIVERSAL_FALLBACKS, per_message=False, allow_reentry=True),
+        C(entry_points=[CQ(ifsc_ss, pattern="^ifsc_single$")], states={IFSC_SINGLE:[MH(F, ifsc_sp)]}, fallbacks=UNIVERSAL_FALLBACKS, per_message=False, allow_reentry=True),
+        C(entry_points=[CQ(ifsc_bs, pattern="^ifsc_batch$")], states={IFSC_BATCH:[MH(F, ifsc_bp)]}, fallbacks=UNIVERSAL_FALLBACKS, per_message=False, allow_reentry=True),
+        C(entry_points=[CQ(adm_add_s, pattern="^admin_add$")], states={ADMIN_ADD_ID:[MH(F, adm_add_id)], ADMIN_ADD_PLAN:[CQ(custom_s, pattern="^plan_custom$"), CQ(adm_add_plan, pattern="^plan_")], ADMIN_CUSTOM_DAYS:[MH(F, custom_days)], ADMIN_CUSTOM_LIMIT:[MH(F, custom_limit)]}, fallbacks=UNIVERSAL_FALLBACKS, per_message=False, allow_reentry=True),
+        C(entry_points=[CQ(adm_rem_s, pattern="^admin_remove$")], states={ADMIN_REM_ID:[MH(F, adm_rem_p)]}, fallbacks=UNIVERSAL_FALLBACKS, per_message=False, allow_reentry=True),
+        C(entry_points=[CQ(adm_sp_s, pattern="^admin_setplan$")], states={ADMIN_EXP_ID:[MH(F, adm_sp_id)], ADMIN_EXP_PLAN:[CQ(custom_s, pattern="^plan_custom$"), CQ(adm_sp_set, pattern="^plan_")], ADMIN_CUSTOM_DAYS:[MH(F, custom_days)], ADMIN_CUSTOM_LIMIT:[MH(F, custom_limit)]}, fallbacks=UNIVERSAL_FALLBACKS, per_message=False, allow_reentry=True),
+        C(entry_points=[CQ(bc_start, pattern="^admin_broadcast$")], states={ADMIN_BROADCAST_MSG:[MH(F, bc_msg)], ADMIN_BROADCAST_CONFIRM:[CQ(bc_confirm, pattern="^broadcast_(confirm|cancel)$")]}, fallbacks=UNIVERSAL_FALLBACKS, per_message=False, allow_reentry=True),
     ]
     for cv in convs: app.add_handler(cv)
 
@@ -1204,11 +1216,10 @@ def main():
         ("admin_back", admin_back), ("admin_free_monitor", adm_monitor),
         ("monitor_exhausted", mon_exhausted), ("monitor_active", mon_active),
         ("monitor_summary", mon_summary), ("main_menu", main_menu_cb),
-        ("verify_join", verify_join),
     ]:
         app.add_handler(CQ(f2, pattern=f"^{p}$"))
 
-    print("🤖 Bot Running! All 6 Features Active.")
+    print("🤖 Bot Running! Clean UPI & All Features Active.")
     app.run_polling(drop_pending_updates=True, allowed_updates=["message", "callback_query"])
 
 if __name__ == "__main__":
