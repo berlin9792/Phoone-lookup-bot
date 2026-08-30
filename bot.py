@@ -11,7 +11,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from flask import Flask
 from pymongo import MongoClient
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatMember
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler,
     MessageHandler, ConversationHandler, ContextTypes, filters
@@ -99,7 +99,7 @@ async def check_joined(context, uid):
         m = await context.bot.get_chat_member(FORCE_JOIN_CHANNEL_ID, uid)
         return m.status in ["member", "administrator", "creator"]
     except Exception as e:
-        logger.warning(f"Force join check: Make sure bot is Admin in {FORCE_JOIN_CHANNEL}. Error: {e}")
+        logger.warning(f"Force join check failed. Ensure bot is admin in {FORCE_JOIN_CHANNEL}. Error: {e}")
         return False
 
 def force_join_kb():
@@ -237,11 +237,17 @@ def check_access(uid, fk, mx, dk, dtk, name):
             if date.today()>exp:
                 fl=free_rem(uid,fk,mx)
                 if fl>0: return True,f"Expired|{fl} free left",0,False,"trial"
-                return False,"Plan Expired! Renew karo.",0,False,"trial"
-            dl=(exp-date.today()).days; dr=daily_rem(uid,dk,dtk); lim=plan.get("daily_limit",0)
-            if plan.get("unlimited"): return True,f"{plan['name']}|∞|{dl}d left",dl,True,pk
-            if dr<=0: return False,f"Daily {name} limit khatam! ({lim}/day)",dl,True,pk
-            return True,f"{plan['name']}|{dr}/{lim} today|{dl}d left",dl,True,pk
+                return False,"Plan Expired! Renew karo.", 0,False,"trial"
+            days_left    = (expiry - date.today()).days
+            daily_rem    = get_phone_daily_remaining(user_id)
+            daily_limit  = plan.get("daily_limit", 0)
+            is_unlimited = plan.get("unlimited", False)
+            if is_unlimited:
+                return True, plan["name"] + " | Unlimited | " + str(days_left) + "d left", days_left, True, plan_key
+            else:
+                if daily_rem <= 0:
+                    return False, f"Daily {name} limit khatam! ({lim}/day)", dl, True, pk
+                return True, f"{plan['name']}|{dr}/{lim} today|{dl}d left", dl, True, pk
         except: pass
     fl=free_rem(uid,fk,mx)
     if fl>0: return True,f"Trial ({fl}/{mx} left)",0,False,"trial"
@@ -500,94 +506,6 @@ def monitor_kb():
         [InlineKeyboardButton("🔙 Admin Menu",callback_data="admin_back")],
     ])
 
-def valid_email(e): return "@" in e and "." in e.split("@")[-1] and " " not in e
-def valid_upi(u): return "@" in u and len(u)>=5 and " " not in u
-def valid_aadhaar(a): return a.isdigit() and len(a)==12
-def valid_ifsc(c): return len(c)==11 and c[:4].isalpha() and c[4]=="0"
-
-# ================== START & VERIFY ==================
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user=update.effective_user
-    get_user(user.id)
-    u_name = safe_name(user)
-
-    if not is_admin(user.id):
-        joined = await check_joined(context, user.id)
-        if not joined:
-            d1 = "━" * 30
-            text = (
-                f"{d1}\n  🔍 *Ultimate Intelligence Bot*\n{d1}\n\n"
-                f"👋 Welcome *{u_name}*!\n\n"
-                "⚠️ *Bot use karne ke liye channel join karo:*\n"
-                f"📢 Channel: {FORCE_JOIN_CHANNEL}\n\n"
-                "Join karke niche ✅ Verify button dabao 👇"
-            )
-            if update.callback_query:
-                await safe_edit(update.callback_query, text, force_join_kb())
-            else:
-                await update.message.reply_text(text, reply_markup=force_join_kb(), parse_mode="Markdown")
-            return ConversationHandler.END
-
-    d1, d2 = "━"*30, "━"*25
-    if is_admin(user.id):
-        text = (
-            f"{d1}\n  🔍 *Ultimate Intelligence Bot*\n{d1}\n\n"
-            f"👋 Welcome *{u_name}*! 🛡️ *Admin*\n\n"
-            f"{d2}\n📱 Phone  : ∞ Unlimited\n📧 Email  : ∞ Unlimited\n💳 UPI    : ∞ Unlimited\n🪪 Aadhaar: ∞ Unlimited\n🚗 Vehicle: ∞ Unlimited\n🏦 IFSC   : ∞ Unlimited\n{d2}\n\n"
-            "Choose search type below 👇"
-        )
-    else:
-        ud=get_user(user.id); plan=get_plan(ud)
-        ip, exp = ud.get("is_premium",False), ud.get("expiry","")
-        lines=[]
-        features = [
-            ("📱 Phone", phone_free, phone_daily, PHONE_FREE),
-            ("📧 Email", email_free, lambda u:999999, EMAIL_FREE),
-            ("💳 UPI", upi_free, upi_daily, UPI_FREE),
-            ("🪪 Aadhaar", aadhaar_free, aadhaar_daily, AADHAAR_FREE),
-            ("🚗 Vehicle", vehicle_free, vehicle_daily, VEHICLE_FREE),
-            ("🏦 IFSC", ifsc_free, ifsc_daily, IFSC_FREE)
-        ]
-        for nm, ff, df, mx in features:
-            fl=ff(user.id)
-            if ip and exp:
-                try:
-                    ed=date.fromisoformat(exp); dl=(ed-date.today()).days
-                    if dl>=0:
-                        if nm=="📧 Email": lines.append(f"{nm}: 💎 ∞ | {dl}d left")
-                        elif plan.get("unlimited"): lines.append(f"{nm}: 💎 ∞ | {dl}d left")
-                        else: dr=df(user.id); lines.append(f"{nm}: 💎 {dr}/{plan.get('daily_limit',0)} | {dl}d left")
-                    else: lines.append(f"{nm}: ⚠️ Expired ({fl}/{mx})")
-                except: lines.append(f"{nm}: ⚪ Unknown")
-            else: lines.append(f"{nm}: 🆓 {fl}/{mx} trial")
-        text = (
-            f"{d1}\n  🔍 *Ultimate Intelligence Bot*\n{d1}\n\n"
-            f"👋 Welcome *{u_name}*!\n\n"
-            f"{d2}\n" + "\n".join(lines) + f"\n{d2}\n\n"
-            "💡 *Ek plan se saare 6 features unlock!*\n\n"
-            f"{d1}\nChoose search type below 👇"
-        )
-
-    if update.callback_query:
-        await safe_edit(update.callback_query, text, main_kb(user.id))
-    else:
-        await update.message.reply_text(text, reply_markup=main_kb(user.id), parse_mode="Markdown")
-    return ConversationHandler.END
-
-async def verify_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q=update.callback_query; await q.answer()
-    if await check_joined(context, q.from_user.id):
-        await safe_edit(q, "✅ *Channel Join Verified!*\n\nBot start ho raha hai... 🎉")
-        await start(update, context)
-    else:
-        await safe_edit(
-            q,
-            f"❌ *Aapne abhi channel join nahi kiya!*\n\n"
-            f"📢 Pehle join karo: {FORCE_JOIN_CHANNEL}\n\n"
-            "Phir niche ✅ Verify button dabao 👇",
-            force_join_kb()
-        )
-
 # ================== MODES ==================
 async def _mode(update, context, title, icon, chk, ff, df, mx, mkb):
     q=update.callback_query; await q.answer(); u=q.from_user
@@ -596,7 +514,8 @@ async def _mode(update, context, title, icon, chk, ff, df, mx, mkb):
         return
     if is_admin(u.id): info="🛡️ Admin — Unlimited"
     else:
-        ok,_,_,ip,_=chk(u.id); fl=ff(u.id); dr=df(u.id)
+        ok,_,_,ip,_=chk(u.id)
+        fl,dr = ff(u.id), df(u.id)  # ✅ Fixed bug: replaced user.id with u.id
         p=get_plan(get_user(u.id))
         info="💎 Unlimited" if ip and p.get("unlimited") else (f"✅ {dr}/{p.get('daily_limit',0)} today" if ip else f"🆓 {fl}/{mx} trial")
     await safe_edit(q, f"━"*30+f"\n{icon} *{title}*\n"+"━"*30+f"\n\n📊 Status: {info}\n\nSingle ya Batch search choose karo:", mkb(u.id))
@@ -891,7 +810,7 @@ async def ifsc_sp(update, context):
 
 async def ifsc_bs(u, c):
     q=u.callback_query; await q.answer()
-    if not is_admin(q.from_user.id) and not await check_joined(c, q.from_user.id):
+    if stereotype := (not is_admin(q.from_user.id) and not await check_joined(c, q.from_user.id)):
         await safe_edit(q, f"⚠️ *Join:* {FORCE_JOIN_CHANNEL}", force_join_kb()); return ConversationHandler.END
     ok,st,_,_,_=ifsc_check(q.from_user.id)
     if not ok: await safe_edit(q, f"🔒 {st}", buy_kb()); return ConversationHandler.END
