@@ -5,12 +5,12 @@ Phone + Email + UPI + Aadhaar + Vehicle + IFSC + Vehicle Info
 ONE PLAN = ALL ACCESS
 + Dual Channel Force Join Check
 + Redeem Code System (Admin Generated)
-+ Clean Results Only (ALL Metadata Blocked)
++ Clean Results Only (ALL Metadata & Rtfgamming Watermarks Blocked)
 + Fast In-Memory Cache + MongoDB Cloud + 24/7 Keep Alive
 + Highly Colorful & Premium Emoji Theme Buttons
 """
 
-import json, os, threading, requests, logging, asyncio
+import json, os, threading, requests, logging, asyncio, re
 from datetime import date, timedelta
 from pathlib import Path
 from flask import Flask
@@ -339,7 +339,6 @@ def use_redeem_code(code, user_id):
     for key in free_keys:
         current_used = ud.get(key, 0)
         max_free = free_maxes[key]
-        # Reduce used count (give back searches), minimum 0
         new_used = max(0, current_used - searches)
         ud[key] = new_used
     
@@ -544,7 +543,7 @@ def vinfo_api(vehicle_num):
         r.raise_for_status(); return {"ok": True, "data": r.json()}
     return _safe_api(call)
 
-# ================== METADATA FILTERING ==================
+# ================== METADATA & AD FILTERING ==================
 SKIP_K = {
     "metadata","meta","key_owner","key_usage","key_expiry","key_enabled",
     "daily_limit","daily_used","api_key","key","action","parameters","service",
@@ -568,9 +567,28 @@ def should_skip_val(v):
     if v is None or v == "": return True
     vs = str(v).lower().strip()
     if vs in ("","none","null","n/a","na","-","0","0.00","0000-00-00","{}","[]"): return True
-    for s in ["@pheevar","pheevar","@lk_","t.me/","telegram.me/"]:
+    for s in ["@pheevar", "pheevar", "@lk_", "t.me/", "telegram.me/", "rtfgamming", "dm for buy"]:
         if s in vs: return True
     return False
+
+def clean_value_text(v):
+    """Surgically strips @Rtfgamming ads and watermarks from values while leaving real data intact."""
+    if not isinstance(v, str):
+        return v
+    # Regex patterns for removing the promo watermark
+    patterns = [
+        r"(?i)📌?\s*dm\s*for\s*buy\s*:\s*@rtfgamming",
+        r"(?i)@rtfgamming",
+        r"(?i)rtfgamming",
+        r"(?i)📌?\s*dm\s*for\s*buy\s*:",
+    ]
+    vs = v
+    for pat in patterns:
+        vs = re.sub(pat, "", vs)
+    
+    # Strip any dangling layout symbols left over after removing the watermark
+    vs = vs.strip().strip("|").strip("-").strip("•").strip("📌").strip()
+    return vs
 
 def em(k):
     k = str(k).lower()
@@ -584,10 +602,19 @@ def clean_metadata(data):
         for k, v in data.items():
             if should_skip_key(k): continue
             cv = clean_metadata(v)
+            if isinstance(cv, str):
+                cv = clean_value_text(cv)
             if not should_skip_val(cv): cleaned[k] = cv
         return cleaned
     elif isinstance(data, list):
-        return [clean_metadata(i) for i in data if not should_skip_val(clean_metadata(i))]
+        cleaned_list = []
+        for i in data:
+            cv = clean_metadata(i)
+            if isinstance(cv, str):
+                cv = clean_value_text(cv)
+            if not should_skip_val(cv):
+                cleaned_list.append(cv)
+        return cleaned_list
     return data
 
 def format_universal_result(term, raw_data, icon="🔍"):
@@ -779,23 +806,17 @@ async def mode_vinfo(u,c): await _mode(u,c,"Vehicle Info","🚘",vinfo_check,vin
 # ================== REDEEM CODE USER COMMAND ==================
 async def redeem_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    if is_user_banned_check(user.id): return
-    
     if not context.args or len(context.args) == 0:
         await safe_reply(update, "🎟️ *Redeem Code System*\n\n📝 Usage: `/redeem YOUR_CODE`\n\nExample: `/redeem AB12CD`\n\n💡 Get redeem codes from admin or giveaways!", back_kb())
         return
     
     code = context.args[0].upper().strip()
-    
     if len(code) < 3 or len(code) > 20:
         await safe_reply(update, "❌ Invalid code format!", back_kb())
         return
     
     success, message = use_redeem_code(code, user.id)
     await safe_reply(update, message, main_kb(user.id))
-
-def is_user_banned_check(uid):
-    return False  # placeholder
 
 async def redeem_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
@@ -1121,7 +1142,7 @@ async def admin_redeem_code_input(update, context):
         return REDEEM_CREATE_CODE
     
     context.user_data["new_redeem_code"] = code
-    await safe_reply(update, f"✅ Code: `{code}`\n\n🎁 Kitne *free searches* dene hain per user?\n(Number daalo, eg: 5, 10, 20)\n\n/cancel to abort")
+    await safe_reply(update, f"Base Code: `{code}`\n\n🎁 Kitne *free searches* dene hain per user?\n(Number daalo, eg: 5, 10, 20)\n\n/cancel to abort")
     return REDEEM_CREATE_SEARCHES
 
 async def admin_redeem_searches_input(update, context):
@@ -1440,7 +1461,7 @@ def main():
     ]:
         app.add_handler(CQ(f2, pattern=f"^{p}$"))
 
-    print("🤖 Bot Running! Redeem Code System + Dual Channel Active!")
+    print("🤖 Bot Running! Watermarks filtered successfully.")
     app.run_polling(drop_pending_updates=True, allowed_updates=["message","callback_query"])
 
 if __name__ == "__main__":
