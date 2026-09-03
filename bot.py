@@ -32,11 +32,12 @@ ADMIN_IDS     = [5057489358, 1968142314]
 DEFAULT_PIN   = "happyrb"
 API_URL       = "https://num-info-hiteck.asurpapa.workers.dev/"
 UPI_API_URL   = "https://nitin-developer-api-paid.nitinshab43.workers.dev/api"
-AADHAAR_API_URL = "https://ansh-apis.is-dev.org/api"
+AADHAAR_API_URL = "https://ansh-apis.is-dev.org/api/ration"
 VEHICLE_API_URL = "https://ansh-apis.is-dev.org/api/vehicle"
 IFSC_API_URL    = "https://all-api-by-nitin-developer-best1.binderdhaniya6.workers.dev/api"
 VINFO_API_URL   = "https://rtf-api-server.onrender.com/api"
 NITIN_API_KEY   = "shree"
+AADHAAR_API_KEY = "shree"
 VEHICLE_API_KEY = "ansh"
 IFSC_API_KEY    = "NITIN"
 VINFO_API_KEY   = "demo2"
@@ -527,7 +528,7 @@ def upi_api(upi_id):
 
 def aadhaar_api(num):
     def call():
-        r = requests.get(AADHAAR_API_URL, params={"action": "aadhar", "aadhar": num, "key": NITIN_API_KEY}, timeout=15)
+        r = requests.get(AADHAAR_API_URL, params={"key": AADHAAR_API_KEY, "id": num}, timeout=15)
         r.raise_for_status(); return {"ok": True, "data": r.json()}
     return _safe_api(call)
 
@@ -598,7 +599,7 @@ def clean_value_text(v):
 
 def em(k):
     k = str(k).lower()
-    for kw, e in {"name":"👤","holder":"👤","email":"📧","phone":"📞","mobile":"📞","address":"📍","city":"🏙️","state":"🗺️","country":"🌍","pincode":"📮","upi":"💳","vpa":"💳","bank":"🏦","ifsc":"🏦","account":"🏦","dob":"🎂","gender":"🚻","pan":"🪪","aadhar":"🪪","aadhaar":"🪪","father":"👨","mother":"👩","vehicle":"🚗","rc":"🚗","owner":"👤","model":"🚗","maker":"🚗","fuel":"⛽","engine":"🔧","chassis":"🔧","registration":"📅","insurance":"📋","fitness":"📋","rto":"🏢","branch":"🏦","district":"🗺️","micr":"🔢","swift":"🔢","verified":"✅","valid":"✅","merchant":"🏪","class":"📋","color":"🎨","colour":"🎨","seating":"💺","standing":"🧍","wheel":"🛞","cylinder":"🔩","cubic":"📐","weight":"⚖️","unladen":"⚖️","norms":"🌿","emission":"🌿","financer":"💰","permit":"📄","tax":"💵","number":"🔢","plate":"🔢","type":"📋","category":"📋","body":"🚗","manufacturer":"🏭","manufacturing":"📅","purchase":"🛒","hypothecation":"🔗","blacklist":"⚠️","noc":"📄","challan":"🎫","status":"📊"}.items():
+    for kw, e in {"name":"👤","holder":"👤","email":"📧","phone":"📞","mobile":"📞","address":"📍","city":"🏙️","state":"🗺️","country":"🌍","pincode":"📮","upi":"💳","vpa":"💳","bank":"🏦","ifsc":"🏦","account":"🏦","dob":"🎂","gender":"🚻","pan":"🪪","aadhar":"🪪","aadhaar":"🪪","father":"👨","mother":"👩","vehicle":"🚗","rc":"🚗","owner":"👤","model":"🚗","maker":"🚗","fuel":"⛽","engine":"🔧","chassis":"🔧","registration":"📅","insurance":"📋","fitness":"📋","rto":"🏢","branch":"🏦","district":"🗺️","micr":"🔢","swift":"🔢","verified":"✅","valid":"✅","merchant":"🏪","class":"📋","color":"🎨","colour":"🎨","seating":"💺","standing":"🧍","wheel":"🛞","cylinder":"🔩","cubic":"📐","weight":"⚖️","unladen":"⚖️","norms":"🌿","emission":"🌿","financer":"💰","permit":"📄","tax":"💵","number":"🔢","plate":"🔢","type":"📋","category":"📋","body":"🚗","manufacturer":"🏭","manufacturing":"📅","purchase":"🛒","hypothecation":"🔗","blacklist":"⚠️","noc":"📄","challan":"🎫","status":"📊","ration":"🍚","card":"💳","family":"👨‍👩‍👧","member":"👥","head":"👤","relation":"🔗","age":"🎂","fps":"🏪","shop":"🏪","scheme":"📋","unit":"🔢","id":"🆔"}.items():
         if kw in k: return e
     return "📌"
 
@@ -1004,11 +1005,11 @@ async def aadh_ss(u,c):
         await safe_edit(q,"⚠️ Join channels!",force_join_kb());return ConversationHandler.END
     ok,st,_,_,_=aadhaar_check(q.from_user.id)
     if not ok:await safe_edit(q,f"🔒 {st}",buy_kb());return ConversationHandler.END
-    await safe_edit(q,"🪪 12 digit Aadhaar:\n/cancel");return AADHAAR_SINGLE
+    await safe_edit(q,"🪪 12 digit Aadhaar number daalo:\n/cancel");return AADHAAR_SINGLE
 
 async def aadh_sp(update,context):
     a=update.message.text.strip().replace(" ","").replace("-","")
-    if not valid_aadhaar(a):await safe_reply(update,"❌ 12 digits!\n/cancel");return AADHAAR_SINGLE
+    if not valid_aadhaar(a):await safe_reply(update,"❌ 12 digits chahiye!\n/cancel");return AADHAAR_SINGLE
     await _do_single(update,context,aadhaar_api,a,a,"🪪",aadhaar_use,aadhaar_check);return ConversationHandler.END
 
 async def aadh_bs(u,c):
