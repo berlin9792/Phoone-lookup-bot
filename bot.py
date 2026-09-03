@@ -29,8 +29,8 @@ logger = logging.getLogger(__name__)
 # ================== CONFIG ==================
 BOT_TOKEN     = "8642873626:AAFy5F79opcK_NMJ7NgGItd6sRrfbOc4TJU"
 ADMIN_IDS     = [5057489358, 1968142314]
-DEFAULT_PIN   = "240841"
-API_URL       = "https://lk-api-pinsstm.ramaxinfo.workers.dev/"
+DEFAULT_PIN   = "happyrb"
+API_URL       = "https://num-info-hiteck.asurpapa.workers.dev/"
 UPI_API_URL   = "https://nitin-developer-api-paid.nitinshab43.workers.dev/api"
 AADHAAR_API_URL = "https://nitin-developer-api-paid.nitinshab43.workers.dev/api"
 VEHICLE_API_URL = "https://ansh-apis.is-dev.org/api/vehicle"
