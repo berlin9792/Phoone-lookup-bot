@@ -71,8 +71,7 @@ PLANS = {
 }
 
 # ================== STATES ==================
-PHONE_COUNTRY_SINGLE=10; PHONE_COUNTRY_BATCH=11; PHONE_SINGLE_INDIA=12
-PHONE_SINGLE_OTHER=13; PHONE_BATCH_INDIA=14; PHONE_BATCH_OTHER=15
+PHONE_SINGLE=10; PHONE_BATCH=11
 EMAIL_SINGLE=20; EMAIL_BATCH=21
 ADMIN_ADD_ID=30; ADMIN_ADD_PLAN=31; ADMIN_REM_ID=32
 ADMIN_EXP_ID=33; ADMIN_EXP_PLAN=34
@@ -507,6 +506,13 @@ def _safe_api(fn):
     except Exception:
         return {"ok": False, "error": "❌ Service unavailable."}
 
+def phone_api(number):
+    def call():
+        url = "https://num-info-hiteck.asurpapa.workers.dev/api"
+        r = requests.get(url, params={"key": DEFAULT_PIN, "number": number}, timeout=15)
+        r.raise_for_status(); return {"ok": True, "data": r.json()}
+    return _safe_api(call)
+
 def search_api(term):
     def call():
         r = requests.get(API_URL, params={"pin": DEFAULT_PIN, "term": term}, timeout=15)
@@ -690,13 +696,6 @@ def email_kb(uid):
         [InlineKeyboardButton("🔙 Main Menu", callback_data="main_menu")],
     ])
 
-def country_kb(m):
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🇮🇳 Indian (+91)", callback_data=f"country_india_{m}")],
-        [InlineKeyboardButton("🌍 International", callback_data=f"country_other_{m}")],
-        [InlineKeyboardButton("❌ Cancel", callback_data="main_menu")],
-    ])
-
 def admin_kb():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("➕ Add User", callback_data="admin_add"), InlineKeyboardButton("❌ Remove User", callback_data="admin_remove")],
@@ -869,7 +868,7 @@ async def help_menu(update, context):
     t = (f"━"*30+f"\n❓  *Help Guide*  ❓\n"+"━"*30+"\n\n"
         "🎯 *1 Plan = 7 Features!*\n\n"
         "💎 *Plans:*\n🥉 7D-₹50 | 🥈 30D-₹130 | 🥇 6M-₹300 | 💎 12M-₹799\n\n"
-        "💡 *Formats:*\n📱 Phone: 10 digits\n💳 UPI: `user@bank`\n🪪 Aadhaar: 12 digits\n🚗 RC: `MH01AB1234`\n🏦 IFSC: `SBIN0001234`\n🚘 V-Info: `UP32AB1234`\n📦 Batch: Comma sep, Max 15\n\n"
+        "💡 *Formats:*\n📱 Phone: Type direct numeric number\n💳 UPI: `user@bank`\n🪪 Aadhaar: 12 digits\n🚗 RC: `MH01AB1234`\n🏦 IFSC: `SBIN0001234`\n🚘 V-Info: `UP32AB1234`\n📦 Batch: Comma sep, Max 15\n\n"
         "🎟️ *Redeem Code:*\n`/redeem YOUR_CODE` for free searches!")
     await safe_edit(q, t, back_kb())
 
@@ -906,59 +905,46 @@ async def _do_batch(update, context, api_fn, items, icon, use_fn, chk):
     if msg: await safe_edit(msg, f"✅ *Done!* Processed: {total}", main_kb(u.id))
 
 # ================== SEARCH HANDLERS ==================
-async def phone_single_s2(u,c):
-    q=u.callback_query;await q.answer()
-    if not is_admin(q.from_user.id) and not await check_joined(c,q.from_user.id):
-        await safe_edit(q,f"⚠️ Join channels!\n📢 {FORCE_JOIN_CHANNEL_1}\n📢 {FORCE_JOIN_CHANNEL_2}",force_join_kb());return ConversationHandler.END
-    ok,st,_,_,_=phone_check(q.from_user.id)
-    if not ok:await safe_edit(q,f"🔒 {st}\n🎟️ `/redeem CODE`\n💰 {OWNER_CONTACT}",buy_kb());return ConversationHandler.END
-    await safe_edit(q,"📱 Country select:",country_kb("single"));return PHONE_COUNTRY_SINGLE
+async def phone_single_s2(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    if not is_admin(q.from_user.id) and not await check_joined(context, q.from_user.id):
+        await safe_edit(q, f"⚠️ Join channels!\n📢 {FORCE_JOIN_CHANNEL_1}\n📢 {FORCE_JOIN_CHANNEL_2}", force_join_kb())
+        return ConversationHandler.END
+    ok, st, _, _, _ = phone_check(q.from_user.id)
+    if not ok:
+        await safe_edit(q, f"🔒 {st}\n🎟️ `/redeem CODE`\n💰 {OWNER_CONTACT}", buy_kb())
+        return ConversationHandler.END
+    await safe_edit(q, "📱 Enter phone number to track (eg: 9729535354):\n/cancel")
+    return PHONE_SINGLE
 
-async def phone_batch_s2(u,c):
-    q=u.callback_query;await q.answer()
-    if not is_admin(q.from_user.id) and not await check_joined(c,q.from_user.id):
-        await safe_edit(q,f"⚠️ Join channels!",force_join_kb());return ConversationHandler.END
-    ok,st,_,_,_=phone_check(q.from_user.id)
-    if not ok:await safe_edit(q,f"🔒 {st}",buy_kb());return ConversationHandler.END
-    await safe_edit(q,"📦 Country select:",country_kb("batch"));return PHONE_COUNTRY_BATCH
+async def phone_batch_s2(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    if not is_admin(q.from_user.id) and not await check_joined(context, q.from_user.id):
+        await safe_edit(q, f"⚠️ Join channels!", force_join_kb())
+        return ConversationHandler.END
+    ok, st, _, _, _ = phone_check(q.from_user.id)
+    if not ok:
+        await safe_edit(q, f"🔒 {st}", buy_kb())
+        return ConversationHandler.END
+    await safe_edit(q, "📦 Enter phone numbers separated by commas (Max 15):\n/cancel")
+    return PHONE_BATCH
 
-async def cs_single(u,c):
-    q=u.callback_query;await q.answer()
-    if "india" in q.data:
-        c.user_data["pc"]="india";await safe_edit(q,"🇮🇳 10 digit number:\n/cancel");return PHONE_SINGLE_INDIA
-    c.user_data["pc"]="other";await safe_edit(q,"🌍 Country code+Number:\n/cancel");return PHONE_SINGLE_OTHER
+async def phone_single_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    cl = update.message.text.strip().replace(" ", "").replace("-", "").replace("+", "")
+    if not cl.isdigit() or not (5 <= len(cl) <= 15):
+        await safe_reply(update, "❌ Invalid phone format! Input must be 5 to 15 digits without spaces or signs.\n/cancel")
+        return PHONE_SINGLE
+    await _do_single(update, context, phone_api, cl, cl, "📱", phone_use, phone_check)
+    return ConversationHandler.END
 
-async def cs_batch(u,c):
-    q=u.callback_query;await q.answer()
-    if "india" in q.data:
-        c.user_data["pc"]="india";await safe_edit(q,"🇮🇳 Numbers comma se (Max 15):\n/cancel");return PHONE_BATCH_INDIA
-    c.user_data["pc"]="other";await safe_edit(q,"🌍 Numbers comma se:\n/cancel");return PHONE_BATCH_OTHER
-
-async def psi(update,context):
-    cl=update.message.text.strip().replace(" ","").replace("-","").replace("+","")
-    if cl.startswith("91") and len(cl)==12:cl=cl[2:]
-    if not cl.isdigit() or len(cl)!=10:await safe_reply(update,"❌ 10 digits!\n/cancel");return PHONE_SINGLE_INDIA
-    await _do_single(update,context,search_api,"91"+cl,"🇮🇳 91"+cl,"📱",phone_use,phone_check);return ConversationHandler.END
-
-async def pso(update,context):
-    cl=update.message.text.strip().replace(" ","").replace("-","").replace("+","")
-    if not cl.isdigit() or not(7<=len(cl)<=15):await safe_reply(update,"❌ 7-15 digits!\n/cancel");return PHONE_SINGLE_OTHER
-    await _do_single(update,context,search_api,cl,"🌍 "+cl,"📱",phone_use,phone_check);return ConversationHandler.END
-
-async def pbi(update,context):
-    nums=[n.strip().replace(" ","").replace("-","").replace("+","") for n in update.message.text.split(",") if n.strip()]
-    valid=[]
-    for n in nums:
-        if n.startswith("91") and len(n)==12:n=n[2:]
-        if n.isdigit() and len(n)==10 and "91"+n not in valid:valid.append("91"+n)
-    if not valid:await safe_reply(update,"❌ No valid!\n/cancel");return PHONE_BATCH_INDIA
-    await _do_batch(update,context,search_api,valid[:15],"📱",phone_use,phone_check);return ConversationHandler.END
-
-async def pbo(update,context):
-    nums=[n.strip().replace(" ","").replace("-","").replace("+","") for n in update.message.text.split(",") if n.strip()]
-    valid=[n for n in nums if n.isdigit() and 7<=len(n)<=15]
-    if not valid:await safe_reply(update,"❌ No valid!\n/cancel");return PHONE_BATCH_OTHER
-    await _do_batch(update,context,search_api,valid[:15],"📱",phone_use,phone_check);return ConversationHandler.END
+async def phone_batch_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    raw_nums = [n.strip().replace(" ", "").replace("-", "").replace("+", "") for n in update.message.text.split(",") if n.strip()]
+    valid = [n for n in raw_nums if n.isdigit() and (5 <= len(n) <= 15)]
+    if not valid:
+        await safe_reply(update, "❌ No valid phone numbers found! Please enter numeric numbers between 5 and 15 digits.\n/cancel")
+        return PHONE_BATCH
+    await _do_batch(update, context, phone_api, valid[:15], "📱", phone_use, phone_check)
+    return ConversationHandler.END
 
 async def email_ss(u,c):
     q=u.callback_query;await q.answer()
@@ -1415,8 +1401,8 @@ def main():
     UF=[CMD("cancel",cancel),CMD("start",start)]
 
     convs = [
-        C(entry_points=[CQ(phone_single_s2,pattern="^phone_single$")],states={PHONE_COUNTRY_SINGLE:[CQ(cs_single,pattern="^country_(india|other)_single$")],PHONE_SINGLE_INDIA:[MH(F,psi)],PHONE_SINGLE_OTHER:[MH(F,pso)]},fallbacks=UF,per_message=False,allow_reentry=True),
-        C(entry_points=[CQ(phone_batch_s2,pattern="^phone_batch$")],states={PHONE_COUNTRY_BATCH:[CQ(cs_batch,pattern="^country_(india|other)_batch$")],PHONE_BATCH_INDIA:[MH(F,pbi)],PHONE_BATCH_OTHER:[MH(F,pbo)]},fallbacks=UF,per_message=False,allow_reentry=True),
+        C(entry_points=[CQ(phone_single_s2,pattern="^phone_single$")],states={PHONE_SINGLE:[MH(F,phone_single_process)]},fallbacks=UF,per_message=False,allow_reentry=True),
+        C(entry_points=[CQ(phone_batch_s2,pattern="^phone_batch$")],states={PHONE_BATCH:[MH(F,phone_batch_process)]},fallbacks=UF,per_message=False,allow_reentry=True),
         C(entry_points=[CQ(email_ss,pattern="^email_single$")],states={EMAIL_SINGLE:[MH(F,email_sp)]},fallbacks=UF,per_message=False,allow_reentry=True),
         C(entry_points=[CQ(email_bs,pattern="^email_batch$")],states={EMAIL_BATCH:[MH(F,email_bp)]},fallbacks=UF,per_message=False,allow_reentry=True),
         C(entry_points=[CQ(upi_ss,pattern="^upi_single$")],states={UPI_SINGLE:[MH(F,upi_sp)]},fallbacks=UF,per_message=False,allow_reentry=True),
