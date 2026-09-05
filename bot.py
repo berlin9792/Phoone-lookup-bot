@@ -73,7 +73,7 @@ REDEEM_CREATE_CODE = 90; REDEEM_CREATE_SEARCHES = 91; REDEEM_CREATE_LIMIT = 92; 
 BANNER = """```
 ╔══════════════════════════════╗    
 ║                              ║
-║ ☠️  Z E R O  T R A C E  ☠️   ║
+║ ☠️  Z E R O  T R A C E  ☠️  ║
 ║          ~BY  LEGIT          ║
 ╚══════════════════════════════╝
 ```"""
