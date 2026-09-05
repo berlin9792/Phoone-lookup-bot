@@ -80,14 +80,14 @@ BANNER = """```
 
 BANNER_MINI = """```
 ┏━━━━━━━━━━━━━━━━━━━━━━┓
-┃  ☠️ ZERO TRACE ☠️     ┃
-┃     ~BY LEGIT         ┃
+┃  ☠️ ZERO TRACE ☠️   ┃
+┃     ~BY LEGIT       ┃
 ┗━━━━━━━━━━━━━━━━━━━━━━┛
 ```"""
 
 BANNER_SEARCH = """```
 ╔═══════════════════════╗
-║ ☠️ ZERO TRACE ☠️      ║
+║    ☠️ ZERO TRACE ☠️  ║
 ║    ~BY LEGIT          ║
 ╚═══════════════════════╝
 ```"""
