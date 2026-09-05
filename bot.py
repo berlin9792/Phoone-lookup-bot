@@ -32,7 +32,7 @@ ADMIN_IDS     = [5057489358, 1968142314]
 DEFAULT_PIN   = "happyrb"
 API_URL       = "https://num-info-hiteck.asurpapa.workers.dev/"
 
-# --- UPDATED UPI CONFIG ---
+# --- UPI CONFIG ---
 UPI_API_URL   = "https://api-src.alonepatel.shop/api"
 UPI_API_KEY   = "INDIAN_HACKER_BRO"
 
@@ -57,6 +57,13 @@ MONGO_URI = os.environ.get(
     "MONGO_URI",
     "mongodb+srv://httplegitfs_db_user:Q8uGZxERXsrf2VV1@cluster0.iojnad7.mongodb.net/?retryWrites=true&w=majority"
 )
+
+# Common headers to avoid 403 / Cloudflare blocks
+COMMON_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+}
 
 # ================== FREE SEARCHES ==================
 PHONE_FREE   = 2
@@ -211,7 +218,6 @@ def init_cache():
     elif LOCAL_FILE.exists():
         try: USERS_CACHE = json.loads(LOCAL_FILE.read_text())
         except Exception: USERS_CACHE = {}
-    # Load redeem codes
     if redeem_col is not None:
         try:
             for doc in redeem_col.find():
@@ -322,11 +328,9 @@ def use_redeem_code(code, user_id):
     if user_id in rc.get("used_by", []):
         return False, "❌ You have already redeemed this code!"
     
-    # Apply free searches to user
     ud = get_user(user_id)
     searches = rc["free_searches"]
     
-    # Add free searches to ALL features
     free_keys = [
         "phone_free_used", "email_free_used", "upi_free_used",
         "aadhaar_free_used", "vehicle_free_used", "ifsc_free_used", "vinfo_free_used"
@@ -343,17 +347,14 @@ def use_redeem_code(code, user_id):
     
     for key in free_keys:
         current_used = ud.get(key, 0)
-        max_free = free_maxes[key]
         new_used = max(0, current_used - searches)
         ud[key] = new_used
     
-    # Track redemption
     if "redeemed_codes" not in ud:
         ud["redeemed_codes"] = []
     ud["redeemed_codes"].append(code)
     save_user(user_id, ud)
     
-    # Update code usage
     rc["used_count"] += 1
     rc["used_by"].append(user_id)
     REDEEM_CODES[code] = rc
@@ -501,65 +502,91 @@ def vinfo_check(u): return check_access(u, "vinfo_free_used", VINFO_FREE, "vinfo
 
 # ================== SAFE API CALLS ==================
 def _safe_api(fn):
-    try: return fn()
+    try:
+        return fn()
     except requests.exceptions.Timeout:
-        return {"ok": False, "error": "⏱️ Request timed out."}
+        return {"ok": False, "error": "⏱️ Request timed out. Server is taking too long."}
     except requests.exceptions.ConnectionError:
-        return {"ok": False, "error": "🌐 Connection error."}
+        return {"ok": False, "error": "🌐 Connection error. API host is currently unreachable."}
     except requests.exceptions.HTTPError as e:
-        code = e.response.status_code if e.response else "Error"
-        return {"ok": False, "error": f"⚠️ Error: {code}"}
-    except Exception:
-        return {"ok": False, "error": "❌ Service unavailable."}
+        code = e.response.status_code if e.response is not None else "Unknown"
+        return {"ok": False, "error": f"⚠️ Server Error (HTTP {code})"}
+    except Exception as e:
+        logger.error(f"API Execution Error: {e}", exc_info=True)
+        return {"ok": False, "error": f"❌ Error: {str(e)}"}
 
 def phone_api(number):
     def call():
         url = "https://num-info-hiteck.asurpapa.workers.dev/api"
-        r = requests.get(url, params={"key": DEFAULT_PIN, "number": number}, timeout=15)
-        r.raise_for_status(); return {"ok": True, "data": r.json()}
+        r = requests.get(url, params={"key": DEFAULT_PIN, "number": number}, headers=COMMON_HEADERS, timeout=15)
+        if r.status_code != 200:
+            return {"ok": False, "error": f"HTTP {r.status_code} Error"}
+        return {"ok": True, "data": r.json()}
     return _safe_api(call)
 
 def search_api(term):
     def call():
-        r = requests.get(API_URL, params={"pin": DEFAULT_PIN, "term": term}, timeout=15)
-        r.raise_for_status(); return {"ok": True, "data": r.json()}
+        r = requests.get(API_URL, params={"pin": DEFAULT_PIN, "term": term}, headers=COMMON_HEADERS, timeout=15)
+        if r.status_code != 200:
+            return {"ok": False, "error": f"HTTP {r.status_code} Error"}
+        return {"ok": True, "data": r.json()}
     return _safe_api(call)
 
-# --- UPDATED UPI API CALL FUNCTION ---
+# --- REFINED UPI API CALL ---
 def upi_api(upi_id):
     def call():
         params = {
             "key": UPI_API_KEY,
             "action": "upiinfo",
-            "upi": upi_id
+            "upi": upi_id.strip()
         }
-        r = requests.get(UPI_API_URL, params=params, timeout=15)
-        r.raise_for_status()
-        return {"ok": True, "data": r.json()}
+        r = requests.get(UPI_API_URL, params=params, headers=COMMON_HEADERS, timeout=15)
+        if r.status_code != 200:
+            return {"ok": False, "error": f"HTTP {r.status_code}: Unable to fetch UPI details."}
+        
+        try:
+            data = r.json()
+        except Exception:
+            return {"ok": False, "error": "API response was not in valid JSON format."}
+
+        # Check API level internal error
+        if isinstance(data, dict):
+            if data.get("status") in [False, "error", 400, 404] or data.get("success") is False:
+                msg = data.get("message") or data.get("error") or data.get("msg") or "Invalid UPI or No Record Found."
+                return {"ok": False, "error": str(msg)}
+        return {"ok": True, "data": data}
     return _safe_api(call)
 
 def aadhaar_api(num):
     def call():
-        r = requests.get(AADHAAR_API_URL, params={"key": AADHAAR_API_KEY, "id": num}, timeout=15)
-        r.raise_for_status(); return {"ok": True, "data": r.json()}
+        r = requests.get(AADHAAR_API_URL, params={"key": AADHAAR_API_KEY, "id": num}, headers=COMMON_HEADERS, timeout=15)
+        if r.status_code != 200:
+            return {"ok": False, "error": f"HTTP {r.status_code} Error"}
+        return {"ok": True, "data": r.json()}
     return _safe_api(call)
 
 def vehicle_api(rc):
     def call():
-        r = requests.get(VEHICLE_API_URL, params={"key": VEHICLE_API_KEY, "rc": rc}, timeout=15)
-        r.raise_for_status(); return {"ok": True, "data": r.json()}
+        r = requests.get(VEHICLE_API_URL, params={"key": VEHICLE_API_KEY, "rc": rc}, headers=COMMON_HEADERS, timeout=15)
+        if r.status_code != 200:
+            return {"ok": False, "error": f"HTTP {r.status_code} Error"}
+        return {"ok": True, "data": r.json()}
     return _safe_api(call)
 
 def ifsc_api(code):
     def call():
-        r = requests.get(IFSC_API_URL, params={"type": "ifsc", "search": code, "api_key": IFSC_API_KEY}, timeout=15)
-        r.raise_for_status(); return {"ok": True, "data": r.json()}
+        r = requests.get(IFSC_API_URL, params={"type": "ifsc", "search": code, "api_key": IFSC_API_KEY}, headers=COMMON_HEADERS, timeout=15)
+        if r.status_code != 200:
+            return {"ok": False, "error": f"HTTP {r.status_code} Error"}
+        return {"ok": True, "data": r.json()}
     return _safe_api(call)
 
 def vinfo_api(vehicle_num):
     def call():
-        r = requests.get(VINFO_API_URL, params={"types": "vinfo", "key": VINFO_API_KEY, "spell": vehicle_num}, timeout=15)
-        r.raise_for_status(); return {"ok": True, "data": r.json()}
+        r = requests.get(VINFO_API_URL, params={"types": "vinfo", "key": VINFO_API_KEY, "spell": vehicle_num}, headers=COMMON_HEADERS, timeout=15)
+        if r.status_code != 200:
+            return {"ok": False, "error": f"HTTP {r.status_code} Error"}
+        return {"ok": True, "data": r.json()}
     return _safe_api(call)
 
 # ================== METADATA & AD FILTERING ==================
@@ -591,10 +618,8 @@ def should_skip_val(v):
     return False
 
 def clean_value_text(v):
-    """Surgically strips @Rtfgamming ads and watermarks from values while leaving real data intact."""
     if not isinstance(v, str):
         return v
-    # Regex patterns for removing the promo watermark
     patterns = [
         r"(?i)📌?\s*dm\s*for\s*buy\s*:\s*@rtfgamming",
         r"(?i)@rtfgamming",
@@ -604,8 +629,6 @@ def clean_value_text(v):
     vs = v
     for pat in patterns:
         vs = re.sub(pat, "", vs)
-    
-    # Strip any dangling layout symbols left over after removing the watermark
     vs = vs.strip().strip("|").strip("-").strip("•").strip("📌").strip()
     return vs
 
@@ -904,7 +927,7 @@ async def _do_single(update, context, api_fn, term, display, icon, use_fn, chk):
         if msg: await safe_edit(msg, text, main_kb(u.id))
         else: await safe_reply(update, text, main_kb(u.id))
     else:
-        err = f"❌ *Failed*\n`{res['error']}`"
+        err = f"❌ *Failed*\n{res['error']}"
         if msg: await safe_edit(msg, err, back_kb())
         else: await safe_reply(update, err, back_kb())
 
@@ -914,7 +937,7 @@ async def _do_batch(update, context, api_fn, items, icon, use_fn, chk):
     for item in items:
         res = api_fn(item)
         if res["ok"]: use_fn(u.id); await safe_reply(update, format_universal_result(item, res["data"], icon))
-        else: await safe_reply(update, f"❌ *{item}*\n`{res['error']}`")
+        else: await safe_reply(update, f"❌ *{item}*\n{res['error']}")
     if msg: await safe_edit(msg, f"✅ *Done!* Processed: {total}", main_kb(u.id))
 
 # ================== SEARCH HANDLERS ==================
@@ -992,7 +1015,7 @@ async def upi_ss(u,c):
         await safe_edit(q,f"⚠️ Join channels!",force_join_kb());return ConversationHandler.END
     ok,st,_,_,_=upi_check(q.from_user.id)
     if not ok:await safe_edit(q,f"🔒 {st}",buy_kb());return ConversationHandler.END
-    await safe_edit(q,"💳 UPI ID daalo:\n/cancel");return UPI_SINGLE
+    await safe_edit(q,"💳 UPI ID daalo (eg: example@okaxis / 9876543210@ybl):\n/cancel");return UPI_SINGLE
 
 async def upi_sp(update,context):
     uid=update.message.text.strip()
