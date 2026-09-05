@@ -31,11 +31,16 @@ BOT_TOKEN     = "8642873626:AAFy5F79opcK_NMJ7NgGItd6sRrfbOc4TJU"
 ADMIN_IDS     = [5057489358, 1968142314]
 DEFAULT_PIN   = "happyrb"
 API_URL       = "https://num-info-hiteck.asurpapa.workers.dev/"
+
+# --- UPDATED UPI CONFIG ---
 UPI_API_URL   = "https://api-src.alonepatel.shop/api"
+UPI_API_KEY   = "INDIAN_HACKER_BRO"
+
 AADHAAR_API_URL = "https://ansh-apis.is-dev.org/api/ration"
 VEHICLE_API_URL = "https://ansh-apis.is-dev.org/api/vehicle"
 IFSC_API_URL    = "https://all-api-by-nitin-developer-best1.binderdhaniya6.workers.dev/api"
 VINFO_API_URL   = "https://rtf-api-server.onrender.com/api"
+
 NITIN_API_KEY   = "INDIAN_HACKER_BRO"
 AADHAAR_API_KEY = "shree"
 VEHICLE_API_KEY = "ansh"
@@ -520,10 +525,17 @@ def search_api(term):
         r.raise_for_status(); return {"ok": True, "data": r.json()}
     return _safe_api(call)
 
+# --- UPDATED UPI API CALL FUNCTION ---
 def upi_api(upi_id):
     def call():
-        r = requests.get(UPI_API_URL, params={"action": "upiinfo", "upi": upi_id, "key": NITIN_API_KEY}, timeout=15)
-        r.raise_for_status(); return {"ok": True, "data": r.json()}
+        params = {
+            "key": UPI_API_KEY,
+            "action": "upiinfo",
+            "upi": upi_id
+        }
+        r = requests.get(UPI_API_URL, params=params, timeout=15)
+        r.raise_for_status()
+        return {"ok": True, "data": r.json()}
     return _safe_api(call)
 
 def aadhaar_api(num):
@@ -935,6 +947,7 @@ async def phone_single_process(update: Update, context: ContextTypes.DEFAULT_TYP
     if not cl.isdigit() or not (5 <= len(cl) <= 15):
         await safe_reply(update, "❌ Invalid phone format! Input must be 5 to 15 digits without spaces or signs.\n/cancel")
         return PHONE_SINGLE
+
     await _do_single(update, context, phone_api, cl, cl, "📱", phone_use, phone_check)
     return ConversationHandler.END
 
