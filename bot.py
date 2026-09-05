@@ -611,6 +611,8 @@ def should_skip_key(k):
 
 def should_skip_val(v):
     if v is None or v == "": return True
+    if isinstance(v, (dict, list)):
+        return len(v) == 0
     vs = str(v).lower().strip()
     if vs in ("","none","null","n/a","na","-","0","0.00","0000-00-00","{}","[]"): return True
     for s in ["@pheevar", "pheevar", "@lk_", "t.me/", "telegram.me/", "rtfgamming", "dm for buy"]:
@@ -681,11 +683,28 @@ def format_universal_result(term, raw_data, icon="🔍"):
         if len(unique) > 1: out.append(f"\n*━━ Record #{idx} ━━*")
         for k, v in rec.items():
             if isinstance(v, (dict, list)) or should_skip_key(k) or should_skip_val(v): continue
-            emoji = em(k); label = str(k).replace("_"," ").replace("-"," ").title()
-            if isinstance(v, bool): vs = "Verified ✅" if v else "Inactive ❌"
-            elif str(v).lower() == "true": vs = "Verified ✅"
-            elif str(v).lower() == "false": vs = "Inactive ❌"
-            else: vs = str(v).strip().title()
+            emoji = em(k)
+            label = str(k).replace("_"," ").replace("-"," ").title()
+            
+            # --- SMART VALUE FORMATTING SYSTEM ---
+            k_lower = str(k).lower().strip()
+            if isinstance(v, bool):
+                if k_lower in ["valid", "verified", "active", "success"]:
+                    vs = "Active ✅" if v else "Inactive/Invalid ❌"
+                else:
+                    vs = "Yes ✅" if v else "No ❌"
+            elif str(v).lower() == "true":
+                vs = "Active ✅" if k_lower in ["valid", "verified", "active", "success"] else "Yes ✅"
+            elif str(v).lower() == "false":
+                vs = "Inactive/Invalid ❌" if k_lower in ["valid", "verified", "active", "success"] else "No ❌"
+            else:
+                val_str = str(v).strip()
+                # Preserves casing for Email, VPA, UPI, IFSC codes
+                if "@" in val_str or k_lower in ["vpa", "upi", "email", "ifsc", "code"]:
+                    vs = val_str
+                else:
+                    vs = val_str.title()
+            
             out.append(f"{emoji} *{label}*: `{vs}`")
     return "\n".join(out)
 
