@@ -304,10 +304,12 @@ def delete_redeem_background(code):
         if redeem_col is not None:
             try:
                 redeem_col.delete_one({"_id": code})
-                except Exception:
-                    pass
-        try: REDEEM_FILE.write_text(json.dumps(REDEEM_CODES, indent=2))
-        except Exception: pass
+            except Exception:
+                pass
+        try:
+            REDEEM_FILE.write_text(json.dumps(REDEEM_CODES, indent=2))
+        except Exception:
+            pass
     threading.Thread(target=_d, daemon=True).start()
 
 def get_user(uid):
