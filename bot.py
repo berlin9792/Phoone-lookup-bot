@@ -77,6 +77,24 @@ PLANS = {
     "12months": {"name": "12 Months", "days": 365, "price": 799, "daily_limit": 999999, "unlimited": True, "is_free": False},
 }
 
+# ================== 📚 FEATURE EXAMPLES ==================
+FEATURE_EXAMPLES = {
+    "phone":    "📞 <b>Example:</b> <code>9876543210</code>",
+    "email":    "📧 <b>Example:</b> <code>john.doe@gmail.com</code>",
+    "upi":      "💳 <b>Example:</b> <code>ramkumar@paytm</code> or <code>9876543210@ybl</code>",
+    "aadhaar":  "🪪 <b>Example:</b> <code>123456789012</code> (12 digits)",
+    "vehicle":  "🚗 <b>Example:</b> <code>DL8CAF5030</code> or <code>MH12AB1234</code>",
+    "ifsc":     "🏦 <b>Example:</b> <code>SBIN0001234</code> (11 chars)",
+    "tg":       "👤 <b>Example:</b> <code>5057489358</code> (Numeric TG ID)",
+    "insta":    "📸 <b>Example:</b> <code>cristiano</code> or <code>@leomessi</code>",
+    "imei":     "📱 <b>Example:</b> <code>354751093234567</code> (15 digits)",
+    "pin":      "📮 <b>Example:</b> <code>110001</code> (6 digits)",
+    "country":  "🌍 <b>Example:</b> <code>India</code> or <code>United States</code>",
+    "paytm":    "💰 <b>Example:</b> <code>9876543210</code>",
+    "ip":       "🌐 <b>Example:</b> <code>8.8.8.8</code> or <code>142.250.191.14</code>",
+    "weather":  "🌤️ <b>Example:</b> <code>Mumbai</code>, <code>Delhi</code>, <code>London</code>",
+}
+
 # ================== 📋 ACTIVITY LOGS SYSTEM ==================
 IST = timezone(timedelta(hours=5, minutes=30))
 ACTIVITY_LOGS = deque(maxlen=200)
@@ -937,36 +955,88 @@ async def mode_weather(u, c): await generic_mode_prompt(u, c, "weather", "Weathe
 
 # ================== 📥 SEARCH HANDLERS ==================
 def make_handler_pair(feat_name, action, param_key, icon, single_state, batch_state, prompt_single, prompt_batch, validator_fn=None):
+    example = FEATURE_EXAMPLES.get(feat_name, "")
+    
     async def single_start(update, context):
         q = update.callback_query; await q.answer()
-        if is_full_maintenance() and not is_admin(q.from_user.id): await safe_edit(q, MAINTENANCE_MSG_FULL, back_kb()); return ConversationHandler.END
-        if is_feature_maintenance(feat_name): await safe_edit(q, maintenance_msg_feature(feat_name), back_kb()); return ConversationHandler.END
+        if is_full_maintenance() and not is_admin(q.from_user.id): 
+            await safe_edit(q, MAINTENANCE_MSG_FULL, back_kb()); return ConversationHandler.END
+        if is_feature_maintenance(feat_name): 
+            await safe_edit(q, maintenance_msg_feature(feat_name), back_kb()); return ConversationHandler.END
         ok, st, _, _, _ = check_feat_access(q.from_user.id, feat_name, feat_name.title())
-        if not ok: await safe_edit(q, f"🔒 {st}", buy_kb()); return ConversationHandler.END
-        await safe_edit(q, f"<code>{BANNER_SEARCH}</code>\n\n{icon} <b>{prompt_single}</b>\n\nSend input or /cancel:")
+        if not ok: 
+            await safe_edit(q, f"🔒 {st}", buy_kb()); return ConversationHandler.END
+        await safe_edit(q, 
+            f"<code>{BANNER_SEARCH}</code>\n\n"
+            f"{icon} <b>{prompt_single}</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"{example}\n\n"
+            f"✍️ <i>Send your input or /cancel:</i>"
+        )
         return single_state
 
     async def batch_start(update, context):
         q = update.callback_query; await q.answer()
-        if is_full_maintenance() and not is_admin(q.from_user.id): await safe_edit(q, MAINTENANCE_MSG_FULL, back_kb()); return ConversationHandler.END
-        if is_feature_maintenance(feat_name): await safe_edit(q, maintenance_msg_feature(feat_name), back_kb()); return ConversationHandler.END
+        if is_full_maintenance() and not is_admin(q.from_user.id): 
+            await safe_edit(q, MAINTENANCE_MSG_FULL, back_kb()); return ConversationHandler.END
+        if is_feature_maintenance(feat_name): 
+            await safe_edit(q, maintenance_msg_feature(feat_name), back_kb()); return ConversationHandler.END
         ok, st, _, _, _ = check_feat_access(q.from_user.id, feat_name, feat_name.title())
-        if not ok: await safe_edit(q, f"🔒 {st}", buy_kb()); return ConversationHandler.END
-        await safe_edit(q, f"<code>{BANNER_SEARCH}</code>\n\n{icon} <b>{prompt_batch}</b>\n\nComma-separated (Max 15) or /cancel:")
+        if not ok: 
+            await safe_edit(q, f"🔒 {st}", buy_kb()); return ConversationHandler.END
+        
+        # Batch example - multiple items using comma separator
+        batch_ex_map = {
+            "phone":    "9876543210, 9123456789, 9012345678",
+            "email":    "user1@gmail.com, user2@yahoo.com",
+            "upi":      "ram@paytm, 9876543210@ybl, rohit@oksbi",
+            "aadhaar":  "123456789012, 987654321098",
+            "vehicle":  "DL8CAF5030, MH12AB1234, KA05MJ6789",
+            "ifsc":     "SBIN0001234, HDFC0000123, ICIC0004567",
+            "tg":       "5057489358, 1968142314",
+            "insta":    "cristiano, leomessi, virat.kohli",
+            "imei":     "354751093234567, 123456789012345",
+            "pin":      "110001, 400001, 500001",
+            "country":  "India, United States, Canada",
+            "paytm":    "9876543210, 9123456789",
+            "ip":       "8.8.8.8, 1.1.1.1, 142.250.191.14",
+            "weather":  "Mumbai, Delhi, London",
+        }
+        batch_ex = batch_ex_map.get(feat_name, "item1, item2, item3")
+        
+        await safe_edit(q, 
+            f"<code>{BANNER_SEARCH}</code>\n\n"
+            f"{icon} <b>{prompt_batch}</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"📋 <b>Batch Example:</b>\n<code>{batch_ex}</code>\n\n"
+            f"ℹ️ Max <b>15 items</b>, comma-separated.\n"
+            f"✍️ <i>Send list or /cancel:</i>"
+        )
         return batch_state
 
     async def single_process(update, context):
         raw = update.message.text.strip()
         val = validator_fn(raw) if validator_fn else raw
-        if not val: await safe_reply(update, "❌ Invalid! /cancel:"); return single_state
-        await execute_search(update, context, feat_name, action, param_key, val, icon, val); return ConversationHandler.END
+        if not val: 
+            await safe_reply(update, 
+                f"❌ <b>Invalid Format!</b>\n\n{example}\n\nTry again or /cancel:"
+            )
+            return single_state
+        await execute_search(update, context, feat_name, action, param_key, val, icon, val)
+        return ConversationHandler.END
 
     async def batch_process(update, context):
         raw_list = [x.strip() for x in update.message.text.split(",") if x.strip()]
         valid_items = [validator_fn(x) if validator_fn else x for x in raw_list]
         valid_items = [x for x in valid_items if x][:15]
-        if not valid_items: await safe_reply(update, "❌ No valid! /cancel:"); return batch_state
-        await execute_batch(update, context, feat_name, action, param_key, valid_items, icon); return ConversationHandler.END
+        if not valid_items: 
+            await safe_reply(update, 
+                f"❌ <b>No Valid Items Found!</b>\n\n{example}\n\nRetry or /cancel:"
+            )
+            return batch_state
+        await execute_batch(update, context, feat_name, action, param_key, valid_items, icon)
+        return ConversationHandler.END
+        
     return single_start, batch_start, single_process, batch_process
 
 def clean_num(x):
@@ -1015,7 +1085,35 @@ async def status_check(update, context):
 
 async def help_menu(update, context):
     q = update.callback_query; await q.answer()
-    await safe_edit(q, f"<code>{BANNER}</code>\n\n❓ <b>HELP</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n🎯 <b>14+ Tools</b>\n📱 Phone | 🪪 Aadhaar | 💳 UPI | 🚗 Vehicle\n🏦 IFSC | 👤 TG | 📸 Insta | 📱 IMEI\n📮 Pincode | 🌍 Country | 💰 Paytm | 🌐 IP | 🌤️ Weather\n\n💎 7D-₹50 | 30D-₹130 | 6M-₹300 | 12M-₹799\n🎟️ <code>/redeem CODE</code>", back_kb())
+    txt = (
+        f"<code>{BANNER}</code>\n\n"
+        f"❓ <b>HELP & FEATURE EXAMPLES</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"🎯 <b>14+ Powerful OSINT Tools</b>\n\n"
+        f"📱 <b>Phone:</b> <code>9876543210</code>\n"
+        f"🪪 <b>Aadhaar:</b> <code>123456789012</code>\n"
+        f"💳 <b>UPI:</b> <code>ram@paytm</code>\n"
+        f"📧 <b>Email:</b> <code>user@gmail.com</code>\n"
+        f"🚗 <b>Vehicle:</b> <code>DL8CAF5030</code>\n"
+        f"🏦 <b>IFSC:</b> <code>SBIN0001234</code>\n"
+        f"👤 <b>Telegram:</b> <code>5057489358</code>\n"
+        f"📸 <b>Instagram:</b> <code>cristiano</code>\n"
+        f"📱 <b>IMEI:</b> <code>354751093234567</code>\n"
+        f"📮 <b>Pincode:</b> <code>110001</code>\n"
+        f"🌍 <b>Country:</b> <code>India</code>\n"
+        f"💰 <b>Paytm:</b> <code>9876543210</code>\n"
+        f"🌐 <b>IP:</b> <code>8.8.8.8</code>\n"
+        f"🌤️ <b>Weather:</b> <code>Mumbai</code>\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"💎 <b>Plans:</b>\n"
+        f"  🥉 7D → ₹50 (10/day)\n"
+        f"  🥈 30D → ₹130 (20/day)\n"
+        f"  🥇 6M → ₹300 (35/day)\n"
+        f"  💎 12M → ₹799 (∞ Unlimited)\n\n"
+        f"🎟️ <b>Redeem:</b> <code>/redeem CODE</code>\n"
+        f"📲 <b>Contact:</b> {OWNER_CONTACT}"
+    )
+    await safe_edit(q, txt, back_kb())
 
 async def buy(update, context):
     q = update.callback_query; await q.answer()
