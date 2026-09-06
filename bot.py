@@ -1233,35 +1233,59 @@ async def adm_sp_set(u, c):
     exp = upgrade(int(uid), pk)
     await safe_edit(q, f"✅ <b>Updated!</b>\n🆔 <code>{uid}</code>\n📦 <b>{plan['name']}</b>\n📅 <code>{exp}</code>", admin_kb()); return ConversationHandler.END
 
-async def adm_list(u, c):
-    q = u.callback_query; await q.answer()
-    if not is_admin(u.id): return
+async def adm_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    if not is_admin(q.from_user.id): return
     users = load_users()
-    if not users: await safe_edit(q, "📋 No users.", admin_kb()); return
-    txt = f"<code>{BANNER_MINI}</code>\n\n📋 <b>USERS ({len(users)})</b>\n\n"
+    if not users: 
+        await safe_edit(q, "📋 No users in database.", admin_kb())
+        return
+    txt = f"<code>{BANNER_MINI}</code>\n\n📋 <b>USERS LIST (Showing last 30)</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
     for uid, info in list(users.items())[-30:]:
         ts = info.get("total_searches",0)
-        if int(uid) in ADMIN_IDS: st = "🛡️"
+        if int(uid) in ADMIN_IDS: st = "🛡️ Admin"
         elif info.get("is_premium") and info.get("expiry"):
-            try: ed = date.fromisoformat(info["expiry"]); st = f"💎{(ed-date.today()).days}d" if date.today() <= ed else "🔴Exp"
-            except Exception: st = "⚪"
-        else: st = "🆓"
-        txt += f"<code>{uid}</code>|{st}|🔍<code>{ts}</code>\n"
+            try: 
+                ed = date.fromisoformat(info["expiry"])
+                st = f"💎 {(ed-date.today()).days}d" if date.today() <= ed else "🔴 Expired"
+            except Exception: st = "⚪ Error"
+        else: st = "🆓 Free"
+        txt += f"👤 <code>{uid}</code> | {st} | 🔍 <code>{ts}</code>\n"
     await safe_edit(q, txt[:4000], admin_kb())
 
-async def adm_stats(u, c):
-    q = u.callback_query; await q.answer()
-    if not is_admin(u.id): return
-    users = load_users(); ts = sum(v.get("total_searches",0) for v in users.values())
+async def adm_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    if not is_admin(q.from_user.id): return
+    users = load_users()
+    ts = sum(v.get("total_searches",0) for v in users.values())
     act = sum(1 for u2, v in users.items() if v.get("is_premium") and int(u2) not in ADMIN_IDS)
-    txt = f"<code>{BANNER_MINI}</code>\n\n📊 <b>STATS</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n👥 <code>{len(users)}</code> | 🔍 <code>{ts}</code> | 💎 <code>{act}</code> | 🎟️ <code>{len(list_redeem_codes())}</code>\n📅 <code>{datetime.now(IST).strftime('%d-%m-%Y %H:%M')}</code>"
+    
+    txt = (
+        f"<code>{BANNER_MINI}</code>\n\n"
+        f"📊 <b>BOT SYSTEM STATS</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"👥 Total Members: <code>{len(users)}</code>\n"
+        f"🔍 Total Searches Executed: <code>{ts}</code>\n"
+        f"💎 Active Premium Users: <code>{act}</code>\n"
+        f"🎟️ Active Redeem Codes: <code>{len(list_redeem_codes())}</code>\n\n"
+        f"📅 Date: <code>{datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')} IST</code>"
+    )
     await safe_edit(q, txt, admin_kb())
 
-async def adm_monitor(u, c):
-    q = u.callback_query; await q.answer()
-    if not is_admin(u.id): return
-    users = load_users(); free = [v for u2, v in users.items() if not v.get("is_premium") and int(u2) not in ADMIN_IDS]
-    await safe_edit(q, f"<code>{BANNER_MINI}</code>\n\n🆓 <b>FREE MONITOR</b>\n👥 <code>{len(free)}</code>", admin_kb())
+async def adm_monitor(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    if not is_admin(q.from_user.id): return
+    users = load_users()
+    free = [v for u2, v in users.items() if not v.get("is_premium") and int(u2) not in ADMIN_IDS]
+    
+    txt = (
+        f"<code>{BANNER_MINI}</code>\n\n"
+        f"🆓 <b>FREE USER MONITOR</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"👥 Active Trial/Free Users: <code>{len(free)}</code>\n"
+        f"💡 Tip: Create promo codes to convert them into premium members!"
+    )
+    await safe_edit(q, txt, admin_kb())
 
 async def bc_start(u, c):
     q = u.callback_query; await q.answer()
