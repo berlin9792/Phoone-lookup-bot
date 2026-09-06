@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-🔍 Ultimate Intelligence Bot - ZERO TRACE (FULL PERSISTENT MAINTENANCE UPDATE)
+🔍 Ultimate Intelligence Bot - ZERO TRACE (DYNAMIC PHONE ENGINE UPDATE)
 Primary All-in-One Engine: alonepatel API
 Backup Engine: Old Individual API Endpoints
-Active Phone OSINT Engine: Cloudflare Storage Tunnel API
+Active Phone OSINT Engine: Cloudflare Storage Tunnel API (Config Switchable)
 Dual Force Join + Blood ASCII Banner + Animated Loader + Redeem Code + MongoDB Cloud
-+ PERSISTENT DATABASE-BACKED MAINTENANCE + ACTIVITY LOGS + 24/7 Keep Alive
++ PERSISTENT DATABASE-BACKED MAINTENANCE + ACTIVITY LOGS + 24/7 Keep Alive + AUTO-LOG CLEANUP (3 DAYS)
 """
 
 import json, os, threading, requests, logging, asyncio, re, time, html, secrets
@@ -35,7 +35,10 @@ OWNER_CONTACT = "@theplayerror"
 PRIMARY_API_URL = "https://api-src.alonepatel.shop/api"
 PRIMARY_API_KEY = "INDIAN_HACKER_BRO"
 
-# ── Active Phone OSINT API ──
+# ── Dynamic Phone Search Engine Selector ──
+PHONE_ENGINE_ACTIVE = "cloudflare"
+
+# ── Active Phone OSINT API (Cloudflare) ──
 ACTIVE_PHONE_API_URL = "https://storage-deutschland-don-patterns.trycloudflare.com/num"
 ACTIVE_PHONE_API_KEY = "DADDY"
 
@@ -89,18 +92,46 @@ def add_activity_log(user_id, username, first_name, feat_name, search_term, stat
         "first_name": first_name or "Unknown",
         "feature": feat_name,
         "search_term": str(search_term)[:50],
-        "status": status
+        "status": status,
+        "timestamp": time.time()  # Timestamp directly added in memory log too
     }
     ACTIVITY_LOGS.append(log_entry)
     try:
         if users_col is not None:
             logs_col = db["activity_logs"]
             threading.Thread(
-                target=lambda: logs_col.insert_one({**log_entry, "timestamp": time.time()}),
+                target=lambda: logs_col.insert_one(log_entry),
                 daemon=True
             ).start()
     except Exception:
         pass
+
+# 🧹 3 Days Automatic Activity Logs Cleanup Loop
+def cleanup_old_logs_loop():
+    while True:
+        try:
+            three_days_ago = time.time() - (3 * 24 * 3600)  # 3 days in seconds (72 Hours)
+            
+            # 1. Clean Database Logs older than 3 days
+            if db is not None:
+                logs_col = db["activity_logs"]
+                res = logs_col.delete_many({"timestamp": {"$lt": three_days_ago}})
+                if res.deleted_count > 0:
+                    logger.info(f"🧹 [Auto-Cleanup] Deleted {res.deleted_count} logs older than 3 days from MongoDB.")
+            
+            # 2. Clean Local Memory Logs older than 3 days
+            current_time = time.time()
+            local_logs = list(ACTIVITY_LOGS)
+            ACTIVITY_LOGS.clear()
+            for log in local_logs:
+                log_ts = log.get("timestamp")
+                if log_ts and (current_time - log_ts < (3 * 24 * 3600)):
+                    ACTIVITY_LOGS.append(log)
+                    
+        except Exception as e:
+            logger.error(f"❌ Error in auto-logs cleanup loop: {e}")
+        
+        time.sleep(1800)  # Har 30 minutes me run hoga cleanup check karne ke liye
 
 def get_recent_logs(count=20):
     logs = list(ACTIVITY_LOGS)
@@ -376,7 +407,7 @@ for feat in ALL_FEATURE_KEYS:
     DEFAULTS[f"{feat}_free_used"] = 0; DEFAULTS[f"{feat}_daily"] = 0; DEFAULTS[f"{feat}_date"] = ""; DEFAULTS[f"{feat}_total"] = 0
 
 def init_cache():
-    global USERS_CACHE, REDEEM_CODES
+    global USERS_CACHE, REDEEM_CODES, ACTIVITY_LOGS
     if users_col is not None:
         try:
             for doc in users_col.find(): USERS_CACHE[str(doc["_id"])] = {k: v for k, v in doc.items() if k != "_id"}
@@ -391,6 +422,22 @@ def init_cache():
     elif REDEEM_FILE.exists():
         try: REDEEM_CODES = json.loads(REDEEM_FILE.read_text())
         except Exception: REDEEM_CODES = {}
+        
+    # Active Logs load karega (Sirf pichle 3 din ke logs hi memory me load honge startup par)
+    if db is not None:
+        try:
+            logs_col = db["activity_logs"]
+            three_days_ago = time.time() - (3 * 24 * 3600)
+            cursor = logs_col.find({"timestamp": {"$gte": three_days_ago}}).sort("timestamp", -1).limit(200)
+            loaded_logs = list(cursor)
+            ACTIVITY_LOGS.clear()
+            for log in reversed(loaded_logs):
+                log.pop("_id", None)
+                ACTIVITY_LOGS.append(log)
+            print(f"✅ Loaded {len(ACTIVITY_LOGS)} active logs from MongoDB (Last 3 days).")
+        except Exception as e:
+            print("⚠️ Startup Logs Load Error:", e)
+
 init_cache()
 
 def sync_user_background(uid, data):
@@ -612,7 +659,7 @@ def clean_value_text(v):
 
 def em(k):
     k = str(k).lower()
-    for kw, e in {"name":"👤","holder":"👤","email":"📧","phone":"📞","mobile":"📞","address":"📍","city":"🏙️","state":"🗺️","country":"🌍","pincode":"📮","upi":"💳","vpa":"💳","bank":"🏦","ifsc":"🏦","account":"🏦","dob":"🎂","gender":"🚻","pan":"🪪","aadhar":"🪪","aadhaar":"🪪","father":"👨","mother":"👩","vehicle":"🚗","rc":"🚗","owner":"👤","model":"🚗","fuel":"⛽","engine":"🔧","chassis":"🔧","registration":"📅","insurance":"📋","rto":"🏢","branch":"🏦","district":"🗺️","verified":"✅","valid":"✅","merchant":"🏪","color":"🎨","weight":"⚖️","number":"🔢","manufacturer":"🏭","blacklist":"⚠️","status":"📊","id":"🆔","username":"👤","user_id":"🆔","followers":"👥","bio":"📝","ip":"🌐","isp":"🏢","weather":"🌤️","temp":"🌡️","humidity":"💧","wind":"💨","imei":"📱","device":"📱"}.items():
+    for kw, e in {"name":"👤","holder":"👤","email":"📧","phone":"📞","mobile":"📞","address":"📍","city":"🏙️","state":"🗺️","country":"🌍","pincode":"📮","upi":"💳","vpa":"💳","bank":"🏦","ifsc":"🏦","account":"🏦","dob":"🎂","gender":"🚻","pan":"🪪","aadhar":"🪪","aadhaar":"🪪","father":"👨","mother":"👩","vehicle":"🚗","rc":"🚗","owner":"👤","model":"🚗","fuel":"⛽","engine":"🔧","chassis":"🔧","registration":"📅","insurance":"📋","rto":"🏢","branch":"🏦","district":"🗺️","verified":"✅","valid":"✅","merchant":"🏪","color":"🎨","weight":"⚖️","number":"🔢","manufacturer":"🏭","blacklist":"⚠️","status":"📊","id":"🆔","username":"👤","user_id":"🆔","followers":"👥","following":"👥","bio":"📝","ip":"🌐","isp":"🏢","weather":"🌤️","temp":"🌡️","humidity":"💧","wind":"💨","imei":"📱","device":"📱"}.items():
         if kw in k: return e
     return "📌"
 
@@ -792,7 +839,7 @@ async def execute_search(update, context, feat_name, action, param_key, search_v
     u = update.effective_user
     if is_full_maintenance() and not is_admin(u.id):
         await safe_reply(update, MAINTENANCE_MSG_FULL, back_kb()); return
-    if is_feature_maintenance(feat_name) and not is_admin(u.id):
+    if is_feature_maintenance(feat_name):
         await safe_reply(update, maintenance_msg_feature(feat_name), back_kb()); return
     ok, st, _, _, _ = check_feat_access(u.id, feat_name, feat_name.title())
     if not ok:
@@ -800,17 +847,23 @@ async def execute_search(update, context, feat_name, action, param_key, search_v
 
     msg = await safe_reply(update, "⏳ <i>Initializing...</i>")
     
-    # NEW PERSISTENT ROUTING FOR ACTIVE PHONE SEARCH API
+    # ── DYNAMIC PHONE SEARCH DUAL ROUTING ENGINE ──
     if feat_name == "phone":
-        api_task = asyncio.get_event_loop().run_in_executor(None, lambda: active_phone_api_call(search_value))
+        if PHONE_ENGINE_ACTIVE == "cloudflare":
+            api_task = asyncio.get_event_loop().run_in_executor(None, lambda: active_phone_api_call(search_value))
+        else:
+            api_task = asyncio.get_event_loop().run_in_executor(None, lambda: primary_api_call(action, {param_key: search_value}))
     else:
         api_task = asyncio.get_event_loop().run_in_executor(None, lambda: primary_api_call(action, {param_key: search_value}))
         
     anim_task = animated_search(msg, icon, display_value)
     res, _ = await asyncio.gather(api_task, anim_task)
     
-    if not res["ok"] and feat_name == "phone": res = await asyncio.get_event_loop().run_in_executor(None, lambda: backup_phone_api(search_value))
-    elif not res["ok"] and feat_name == "email": res = await asyncio.get_event_loop().run_in_executor(None, lambda: backup_search_worker_api(search_value))
+    # ── DYNAMIC BACKUP ROUTER ──
+    if not res["ok"] and feat_name == "phone":
+        res = await asyncio.get_event_loop().run_in_executor(None, lambda: backup_phone_api(search_value))
+    elif not res["ok"] and feat_name == "email":
+        res = await asyncio.get_event_loop().run_in_executor(None, lambda: backup_search_worker_api(search_value))
 
     if res["ok"]:
         use_feature(u.id, feat_name)
@@ -830,7 +883,7 @@ async def execute_batch(update, context, feat_name, action, param_key, items, ic
     
     if is_full_maintenance() and not is_admin(u.id):
         await safe_reply(update, MAINTENANCE_MSG_FULL, back_kb()); return
-    if is_feature_maintenance(feat_name) and not is_admin(u.id):
+    if is_feature_maintenance(feat_name):
         await safe_reply(update, maintenance_msg_feature(feat_name), back_kb()); return
 
     msg = await safe_reply(update, f"<code>{BANNER_MINI}</code>\n\n📦 <b>Batch:</b> <b>{total}</b>\n\n<code>[░░░░░░░░░░░░░░░░░░░░]</code> 0%")
@@ -839,9 +892,12 @@ async def execute_batch(update, context, feat_name, action, param_key, items, ic
         try: await msg.edit_text(f"<code>{BANNER_MINI}</code>\n\n📦 <code>{html.escape(str(item))}</code>\n📊 <b>{idx}/{total}</b>\n\n<code>[{bar}]</code> <b>{pct}%</b>", parse_mode="HTML")
         except Exception: pass
         
-        # Batch Route Selection
+        # ── Batch Phone/Feature DUAL Routing Selection ──
         if feat_name == "phone":
-            res = active_phone_api_call(item)
+            if PHONE_ENGINE_ACTIVE == "cloudflare":
+                res = active_phone_api_call(item)
+            else:
+                res = primary_api_call(action, {param_key: item})
             if not res["ok"]: res = backup_phone_api(item)
         else:
             res = primary_api_call(action, {param_key: item})
@@ -860,7 +916,7 @@ async def execute_batch(update, context, feat_name, action, param_key, items, ic
 async def generic_mode_prompt(update, context, feat_name, display_title, icon):
     q = update.callback_query; await q.answer(); u = q.from_user
     if is_full_maintenance() and not is_admin(u.id): await safe_edit(q, MAINTENANCE_MSG_FULL, back_kb()); return
-    if is_feature_maintenance(feat_name) and not is_admin(u.id): await safe_edit(q, maintenance_msg_feature(feat_name), back_kb()); return
+    if is_feature_maintenance(feat_name): await safe_edit(q, maintenance_msg_feature(feat_name), back_kb()); return
     if not is_admin(u.id) and not await check_joined(context, u.id): await safe_edit(q, "⚠️ Join!", force_join_kb()); return
     await safe_edit(q, f"<code>{BANNER_SEARCH}</code>\n\n{icon} <b>{display_title}</b> {icon}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nChoose:", search_sub_kb(u.id, feat_name))
 
@@ -884,7 +940,7 @@ def make_handler_pair(feat_name, action, param_key, icon, single_state, batch_st
     async def single_start(update, context):
         q = update.callback_query; await q.answer()
         if is_full_maintenance() and not is_admin(q.from_user.id): await safe_edit(q, MAINTENANCE_MSG_FULL, back_kb()); return ConversationHandler.END
-        if is_feature_maintenance(feat_name) and not is_admin(q.from_user.id): await safe_edit(q, maintenance_msg_feature(feat_name), back_kb()); return ConversationHandler.END
+        if is_feature_maintenance(feat_name): await safe_edit(q, maintenance_msg_feature(feat_name), back_kb()); return ConversationHandler.END
         ok, st, _, _, _ = check_feat_access(q.from_user.id, feat_name, feat_name.title())
         if not ok: await safe_edit(q, f"🔒 {st}", buy_kb()); return ConversationHandler.END
         await safe_edit(q, f"<code>{BANNER_SEARCH}</code>\n\n{icon} <b>{prompt_single}</b>\n\nSend input or /cancel:")
@@ -893,7 +949,7 @@ def make_handler_pair(feat_name, action, param_key, icon, single_state, batch_st
     async def batch_start(update, context):
         q = update.callback_query; await q.answer()
         if is_full_maintenance() and not is_admin(q.from_user.id): await safe_edit(q, MAINTENANCE_MSG_FULL, back_kb()); return ConversationHandler.END
-        if is_feature_maintenance(feat_name) and not is_admin(q.from_user.id): await safe_edit(q, maintenance_msg_feature(feat_name), back_kb()); return ConversationHandler.END
+        if is_feature_maintenance(feat_name): await safe_edit(q, maintenance_msg_feature(feat_name), back_kb()); return ConversationHandler.END
         ok, st, _, _, _ = check_feat_access(q.from_user.id, feat_name, feat_name.title())
         if not ok: await safe_edit(q, f"🔒 {st}", buy_kb()); return ConversationHandler.END
         await safe_edit(q, f"<code>{BANNER_SEARCH}</code>\n\n{icon} <b>{prompt_batch}</b>\n\nComma-separated (Max 15) or /cancel:")
@@ -1000,7 +1056,7 @@ async def admin_logs_menu(update, context):
         f"📋 <b>ACTIVITY LOGS CENTER</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         f"📊 Total Logs Stored: <code>{total_logs}</code>\n"
-        f"💾 Max Capacity: <code>200</code>\n\n"
+        f"💾 Max Capacity: <code>200 (Auto-cleans &gt; 3 days)</code>\n\n"
         f"👇 <b>Select log view:</b>"
     )
     await safe_edit(q, txt, logs_kb())
@@ -1094,7 +1150,7 @@ async def logs_stats(update, context):
         f"<code>{BANNER_MINI}</code>\n\n"
         f"📊 <b>LOG STATISTICS</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"📋 Total Logs: <code>{total}</code>\n"
+        f"📋 Total Active (3D): <code>{total}</code>\n"
         f"✅ Successful: <code>{success}</code>\n"
         f"❌ Failed: <code>{failed}</code>\n"
         f"👥 Unique Users: <code>{unique_users}</code>\n\n"
@@ -1309,6 +1365,10 @@ async def error_handler(update, context):
 def main():
     threading.Thread(target=start_webserver, daemon=True).start()
     print("🌐 Keep-alive on port 8080!")
+
+    # 🧹 Auto-cleanup thread startup
+    threading.Thread(target=cleanup_old_logs_loop, daemon=True).start()
+    print("🧹 Logs Auto-Cleanup Engine Started (Interval: 3 Days)!")
 
     req = HTTPXRequest(connect_timeout=20, read_timeout=20, write_timeout=20)
     gur = HTTPXRequest(connect_timeout=20, read_timeout=30, write_timeout=20)
