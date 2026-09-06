@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
 """
-🔍 Ultimate Intelligence Bot - ZERO TRACE (FULL MERGED ENGINE - MAINTENANCE UPDATE)
-Primary All-in-One Engine: alonepatel API
-Backup Engine: Old Individual API Endpoints
-Dual Force Join + Blood ASCII Banner + Animated Loader + Redeem Code + MongoDB Cloud
-+ FULL MAINTENANCE MODE + PER-FEATURE MAINTENANCE + 24/7 Keep Alive
+🔍 Ultimate Intelligence Bot - ZERO TRACE (FULL MERGED ENGINE - LOGS UPDATE)
++ Activity Logs System - Track who searched what
 """
 
 import json, os, threading, requests, logging, asyncio, re, time, html, secrets
 from datetime import date, timedelta, datetime, timezone
 from pathlib import Path
+from collections import deque
 from flask import Flask
 from pymongo import MongoClient
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -52,7 +50,7 @@ FORCE_JOIN_CHANNEL_2_ID = "@zerotracelegit"
 
 MONGO_URI = os.environ.get("MONGO_URI", "mongodb+srv://httplegitfs_db_user:Q8uGZxERXsrf2VV1@cluster0.iojnad7.mongodb.net/?retryWrites=true&w=majority")
 COMMON_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Linux; Android 13; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
+    "User-Agent": "Mozilla/5.0 (Linux; Android 13; SM-G991B) AppleWebKit/537.36",
     "Accept": "application/json, text/plain, */*",
     "Referer": "https://api-src.alonepatel.shop/",
 }
@@ -67,27 +65,89 @@ PLANS = {
     "12months": {"name": "12 Months", "days": 365, "price": 799, "daily_limit": 999999, "unlimited": True, "is_free": False},
 }
 
-# ================== 🔧 MAINTENANCE SYSTEM ==================
-# Full bot maintenance - blocks everything for non-admins
-FULL_MAINTENANCE = False
+# ================== 📋 ACTIVITY LOGS SYSTEM ==================
+IST = timezone(timedelta(hours=5, minutes=30))
 
-# Per-feature maintenance - blocks individual features
-FEATURE_MAINTENANCE = {}  # e.g. {"phone": True, "upi": True}
+# Store last 200 search logs in memory (deque = auto-remove oldest)
+ACTIVITY_LOGS = deque(maxlen=200)
+
+def add_activity_log(user_id, username, first_name, feat_name, search_term, status="success"):
+    """Add a search activity log entry"""
+    now = datetime.now(IST)
+    log_entry = {
+        "time": now.strftime("%d-%m-%Y %H:%M:%S"),
+        "time_short": now.strftime("%H:%M"),
+        "date": now.strftime("%d-%m"),
+        "user_id": user_id,
+        "username": username or "N/A",
+        "first_name": first_name or "Unknown",
+        "feature": feat_name,
+        "search_term": str(search_term)[:50],  # Limit length for display
+        "status": status
+    }
+    ACTIVITY_LOGS.append(log_entry)
+    
+    # Also save to MongoDB if available
+    try:
+        if users_col is not None:
+            logs_col = db["activity_logs"]
+            threading.Thread(
+                target=lambda: logs_col.insert_one({**log_entry, "timestamp": time.time()}),
+                daemon=True
+            ).start()
+    except Exception:
+        pass
+
+def get_recent_logs(count=20):
+    """Get last N log entries"""
+    logs = list(ACTIVITY_LOGS)
+    return logs[-count:] if len(logs) > count else logs
+
+def get_user_logs(user_id, count=10):
+    """Get logs for a specific user"""
+    user_logs = [l for l in ACTIVITY_LOGS if l["user_id"] == user_id]
+    return user_logs[-count:]
+
+def get_feature_logs(feat_name, count=15):
+    """Get logs for a specific feature"""
+    feat_logs = [l for l in ACTIVITY_LOGS if l["feature"] == feat_name]
+    return feat_logs[-count:]
+
+def format_logs_text(logs, title="📋 ACTIVITY LOGS"):
+    """Format log entries into readable HTML text"""
+    if not logs:
+        return f"<code>{BANNER_MINI}</code>\n\n{title}\n\n📭 <i>No activity logs yet.</i>"
+    
+    txt = f"<code>{BANNER_MINI}</code>\n\n<b>{title}</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    
+    for log in reversed(logs):  # newest first
+        status_icon = "✅" if log["status"] == "success" else "❌"
+        uname = f"@{log['username']}" if log['username'] != "N/A" else log['first_name']
+        
+        txt += (
+            f"{status_icon} <b>{log['time_short']}</b> | "
+            f"<code>{log['user_id']}</code> | "
+            f"<b>{html.escape(uname)}</b>\n"
+            f"   🔍 <b>{log['feature'].upper()}</b> → "
+            f"<code>{html.escape(log['search_term'])}</code>\n\n"
+        )
+    
+    return txt[:4000]  # Telegram message limit
+
+# ================== 🔧 MAINTENANCE SYSTEM ==================
+FULL_MAINTENANCE = False
+FEATURE_MAINTENANCE = {}
 
 ALL_FEATURE_KEYS = [
     "phone", "email", "upi", "aadhaar", "vehicle", "ifsc",
     "tg", "insta", "imei", "pin", "country", "paytm", "ip", "weather"
 ]
 
-# Initialize all features as NOT under maintenance
 for _fk in ALL_FEATURE_KEYS:
     FEATURE_MAINTENANCE[_fk] = False
 
-def is_full_maintenance():
-    return FULL_MAINTENANCE
-
-def is_feature_maintenance(feat_name):
-    return FEATURE_MAINTENANCE.get(feat_name, False)
+def is_full_maintenance(): return FULL_MAINTENANCE
+def is_feature_maintenance(feat_name): return FEATURE_MAINTENANCE.get(feat_name, False)
 
 def toggle_full_maintenance():
     global FULL_MAINTENANCE
@@ -101,31 +161,16 @@ def toggle_feature_maintenance(feat_name):
     return False
 
 def get_maintenance_status():
-    lines = []
-    lines.append(f"🔧 <b>Full Bot Maintenance:</b> {'🔴 ON' if FULL_MAINTENANCE else '🟢 OFF'}")
-    lines.append("")
-    lines.append("<b>Per-Feature Maintenance:</b>")
+    lines = [f"🔧 <b>Full Bot Maintenance:</b> {'🔴 ON' if FULL_MAINTENANCE else '🟢 OFF'}", "", "<b>Per-Feature Maintenance:</b>"]
     for feat in ALL_FEATURE_KEYS:
         status = "🔴 ON" if FEATURE_MAINTENANCE.get(feat, False) else "🟢 OFF"
         lines.append(f"  • <b>{feat.title()}</b>: {status}")
     return "\n".join(lines)
 
-MAINTENANCE_MSG_FULL = (
-    "🛠️ <b>BOT UNDER MAINTENANCE</b>\n\n"
-    "⚠️ The bot is currently undergoing maintenance.\n"
-    "All services are temporarily unavailable.\n\n"
-    "⏳ Please try again later.\n"
-    f"📞 Contact: {OWNER_CONTACT}"
-)
+MAINTENANCE_MSG_FULL = f"🛠️ <b>BOT UNDER MAINTENANCE</b>\n\n⚠️ All services temporarily unavailable.\n\n⏳ Please try again later.\n📞 Contact: {OWNER_CONTACT}"
 
 def maintenance_msg_feature(feat_name):
-    return (
-        f"🛠️ <b>{feat_name.upper()} - UNDER MAINTENANCE</b>\n\n"
-        f"⚠️ The <b>{feat_name.title()}</b> feature is currently under maintenance.\n"
-        f"Other features may still be available.\n\n"
-        f"⏳ Please try again later.\n"
-        f"📞 Contact: {OWNER_CONTACT}"
-    )
+    return f"🛠️ <b>{feat_name.upper()} - UNDER MAINTENANCE</b>\n\n⚠️ <b>{feat_name.title()}</b> is currently under maintenance.\nOther features may still be available.\n\n⏳ Try again later.\n📞 Contact: {OWNER_CONTACT}"
 
 # ================== 🔢 CONVERSATION STATES ==================
 PHONE_SINGLE, PHONE_BATCH       = 10, 11
@@ -142,7 +187,6 @@ COUNTRY_SINGLE, COUNTRY_BATCH   = 30, 31
 PAYTM_SINGLE, PAYTM_BATCH       = 32, 33
 IP_SINGLE, IP_BATCH             = 34, 35
 WEATHER_SINGLE, WEATHER_BATCH   = 36, 37
-
 ADMIN_ADD_ID, ADMIN_ADD_PLAN    = 50, 51
 ADMIN_REM_ID                    = 52
 ADMIN_EXP_ID, ADMIN_EXP_PLAN    = 53, 54
@@ -150,11 +194,11 @@ ADMIN_BROADCAST_MSG             = 55
 ADMIN_BROADCAST_CONFIRM         = 56
 ADMIN_CUSTOM_DAYS               = 57
 ADMIN_CUSTOM_LIMIT              = 58
-
 REDEEM_CREATE_CODE              = 70
 REDEEM_CREATE_SEARCHES          = 71
 REDEEM_CREATE_LIMIT             = 72
 REDEEM_DELETE_CODE              = 73
+ADMIN_LOGS_USER_ID              = 80
 
 # ================== 🩸 BANNERS ==================
 BANNER = (
@@ -163,14 +207,12 @@ BANNER = (
     "║          ~BY  LEGIT               ║\n"
     "╚══════════════════════════════╝"
 )
-
 BANNER_MINI = (
     "┏━━━━━━━━━━━━━━━━━━━━━━┓\n"
     "┃  ☠️ ZERO TRACE ☠️        ┃\n"
     "┃     ~BY LEGIT            ┃\n"
     "┗━━━━━━━━━━━━━━━━━━━━━━┛"
 )
-
 BANNER_SEARCH = (
     "╔═══════════════════════╗\n"
     "║    ☠️ ZERO TRACE ☠️       ║\n"
@@ -188,11 +230,8 @@ async def safe_reply(update: Update, text: str, reply_markup=None):
         logger.warning(f"safe_reply HTML failed: {e}")
         clean = re.sub(r"</?(?:b|i|code|pre|u|s)>", "", text)
         clean = html.unescape(clean)
-        try:
-            return await msg.reply_text(clean[:4096], reply_markup=reply_markup)
-        except Exception as e2:
-            logger.error(f"safe_reply fallback error: {e2}")
-            return None
+        try: return await msg.reply_text(clean[:4096], reply_markup=reply_markup)
+        except Exception as e2: logger.error(f"safe_reply fallback: {e2}"); return None
 
 async def safe_edit(target, text: str, reply_markup=None):
     try:
@@ -209,12 +248,9 @@ async def safe_edit(target, text: str, reply_markup=None):
                 return await target.edit_message_text(clean[:4096], reply_markup=reply_markup)
             elif hasattr(target, "edit_text"):
                 return await target.edit_text(clean[:4096], reply_markup=reply_markup)
-        except Exception as e2:
-            logger.error(f"safe_edit fallback error: {e2}")
-            return None
+        except Exception as e2: logger.error(f"safe_edit fallback: {e2}"); return None
 
 def is_admin(uid): return int(uid) in ADMIN_IDS
-
 def safe_name(user):
     name = user.first_name or "User"
     return html.escape(name)
@@ -253,10 +289,8 @@ async def animated_search(msg, icon, display):
 web_app = Flask(__name__)
 @web_app.route('/')
 def keep_alive_status(): return "Bot Running 24/7!", 200
-
 def start_webserver():
-    import logging as lg
-    lg.getLogger('werkzeug').setLevel(lg.ERROR)
+    import logging as lg; lg.getLogger('werkzeug').setLevel(lg.ERROR)
     web_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
 
 # ================== 🔒 DUAL FORCE JOIN ==================
@@ -264,12 +298,11 @@ async def check_joined(context, uid):
     if is_admin(uid): return True
     try:
         m1 = await context.bot.get_chat_member(FORCE_JOIN_CHANNEL_1_ID, uid)
-        if m1.status not in ["member", "administrator", "creator", "restricted"]: return False
+        if m1.status not in ["member","administrator","creator","restricted"]: return False
         m2 = await context.bot.get_chat_member(FORCE_JOIN_CHANNEL_2_ID, uid)
-        return m2.status in ["member", "administrator", "creator", "restricted"]
+        return m2.status in ["member","administrator","creator","restricted"]
     except Exception as e:
-        logger.warning(f"Channel join check notice (User {uid}): {e}")
-        return True
+        logger.warning(f"Join check (User {uid}): {e}"); return True
 
 def force_join_kb():
     return InlineKeyboardMarkup([
@@ -279,52 +312,36 @@ def force_join_kb():
     ])
 
 # ================== 💾 MONGODB + LOCAL CACHE ==================
-USERS_CACHE = {}
-REDEEM_CODES = {}
-LOCAL_FILE = Path("users.json")
-REDEEM_FILE = Path("redeem_codes.json")
+USERS_CACHE = {}; REDEEM_CODES = {}
+LOCAL_FILE = Path("users.json"); REDEEM_FILE = Path("redeem_codes.json")
 
 try:
     mc = MongoClient(MONGO_URI, serverSelectionTimeoutMS=2500)
-    db = mc["tele_intel_bot"]
-    users_col = db["users"]
-    redeem_col = db["redeem_codes"]
-    mc.admin.command('ping')
-    print("✅ MongoDB Connected!")
+    db = mc["tele_intel_bot"]; users_col = db["users"]; redeem_col = db["redeem_codes"]
+    mc.admin.command('ping'); print("✅ MongoDB Connected!")
 except Exception as e:
-    print("⚠️ MongoDB Connection Warning:", e)
-    users_col = None
-    redeem_col = None
+    print("⚠️ MongoDB:", e); users_col = None; redeem_col = None; db = None
 
-DEFAULTS = {
-    "plan": "trial", "expiry": "", "is_premium": False,
-    "total_searches": 0, "redeemed_codes": []
-}
+DEFAULTS = {"plan": "trial", "expiry": "", "is_premium": False, "total_searches": 0, "redeemed_codes": []}
 for feat in ALL_FEATURE_KEYS:
-    DEFAULTS[f"{feat}_free_used"] = 0
-    DEFAULTS[f"{feat}_daily"] = 0
-    DEFAULTS[f"{feat}_date"] = ""
-    DEFAULTS[f"{feat}_total"] = 0
+    DEFAULTS[f"{feat}_free_used"] = 0; DEFAULTS[f"{feat}_daily"] = 0; DEFAULTS[f"{feat}_date"] = ""; DEFAULTS[f"{feat}_total"] = 0
 
 def init_cache():
     global USERS_CACHE, REDEEM_CODES
     if users_col is not None:
         try:
-            for doc in users_col.find():
-                USERS_CACHE[str(doc["_id"])] = {k: v for k, v in doc.items() if k != "_id"}
+            for doc in users_col.find(): USERS_CACHE[str(doc["_id"])] = {k: v for k, v in doc.items() if k != "_id"}
         except Exception: pass
     elif LOCAL_FILE.exists():
         try: USERS_CACHE = json.loads(LOCAL_FILE.read_text())
         except Exception: USERS_CACHE = {}
     if redeem_col is not None:
         try:
-            for doc in redeem_col.find():
-                REDEEM_CODES[str(doc["_id"])] = {k: v for k, v in doc.items() if k != "_id"}
+            for doc in redeem_col.find(): REDEEM_CODES[str(doc["_id"])] = {k: v for k, v in doc.items() if k != "_id"}
         except Exception: pass
     elif REDEEM_FILE.exists():
         try: REDEEM_CODES = json.loads(REDEEM_FILE.read_text())
         except Exception: REDEEM_CODES = {}
-
 init_cache()
 
 def sync_user_background(uid, data):
@@ -357,8 +374,7 @@ def delete_redeem_background(code):
 def get_user(uid):
     uid = str(uid)
     if uid not in USERS_CACHE:
-        d = {**DEFAULTS, "added": date.today().isoformat()}
-        USERS_CACHE[uid] = d; sync_user_background(uid, d)
+        d = {**DEFAULTS, "added": date.today().isoformat()}; USERS_CACHE[uid] = d; sync_user_background(uid, d)
     else:
         d = USERS_CACHE[uid]; updated = False
         for k, v in DEFAULTS.items():
@@ -366,8 +382,7 @@ def get_user(uid):
         if updated: sync_user_background(uid, d)
     return USERS_CACHE[uid]
 
-def save_user(uid, data):
-    uid = str(uid); USERS_CACHE[uid] = data; sync_user_background(uid, data)
+def save_user(uid, data): uid = str(uid); USERS_CACHE[uid] = data; sync_user_background(uid, data)
 
 def delete_user(uid):
     uid = str(uid)
@@ -390,18 +405,17 @@ def create_redeem_code(code, fs, mu):
 
 def use_redeem_code(code, user_id):
     code = code.upper().strip(); user_id = str(user_id)
-    if code not in REDEEM_CODES: return False, "❌ Invalid promo code!"
+    if code not in REDEEM_CODES: return False, "❌ Invalid!"
     rc = REDEEM_CODES[code]
-    if not rc.get("active", True): return False, "❌ Promo code is deactivated!"
-    if rc["used_count"] >= rc["max_uses"]: return False, "❌ Max user redemptions reached!"
-    if user_id in rc.get("used_by", []): return False, "❌ You have already redeemed this code!"
+    if not rc.get("active", True): return False, "❌ Deactivated!"
+    if rc["used_count"] >= rc["max_uses"]: return False, "❌ Max reached!"
+    if user_id in rc.get("used_by", []): return False, "❌ Already redeemed!"
     ud = get_user(user_id); s = rc["free_searches"]
-    for feat in ALL_FEATURE_KEYS:
-        k = f"{feat}_free_used"; ud[k] = max(0, ud.get(k, 0) - s)
+    for feat in ALL_FEATURE_KEYS: k = f"{feat}_free_used"; ud[k] = max(0, ud.get(k, 0) - s)
     if "redeemed_codes" not in ud: ud["redeemed_codes"] = []
     ud["redeemed_codes"].append(code); save_user(user_id, ud)
     rc["used_count"] += 1; rc["used_by"].append(user_id); REDEEM_CODES[code] = rc; sync_redeem_background(code, rc)
-    return True, f"🎉 <code>{code}</code> redeemed!\n🎁 <b>+{s} Extra Searches</b> on ALL tools!\n📊 Uses: <code>{rc['used_count']}/{rc['max_uses']}</code>"
+    return True, f"🎉 <code>{code}</code> redeemed!\n🎁 <b>+{s}</b> on ALL!\n📊 <code>{rc['used_count']}/{rc['max_uses']}</code>"
 
 def delete_redeem_code(code):
     code = code.upper().strip()
@@ -442,27 +456,27 @@ def check_feat_access(uid, feat_name, display_title):
             exp = date.fromisoformat(exp_s)
             if date.today() > exp:
                 fl = max(0, FREE_LIMIT - ud.get(fk, 0))
-                return (True, f"Expired | {fl} Free", 0, False, "trial") if fl > 0 else (False, "Plan Expired!", 0, False, "trial")
+                return (True, f"Expired|{fl}", 0, False, "trial") if fl > 0 else (False, "Expired!", 0, False, "trial")
             dl = (exp - date.today()).days; lim = plan.get("daily_limit", 0)
-            if plan.get("unlimited"): return True, f"{plan['name']} | ∞ | {dl}d", dl, True, pk
+            if plan.get("unlimited"): return True, f"{plan['name']}|∞|{dl}d", dl, True, pk
             dr = lim if ud.get(dtk, "") != date.today().isoformat() else max(0, lim - ud.get(dk, 0))
-            if dr <= 0: return False, f"Daily limit over! ({lim}/day)", dl, True, pk
-            return True, f"{plan['name']} | {dr}/{lim} | {dl}d", dl, True, pk
+            if dr <= 0: return False, f"Limit!({lim}/day)", dl, True, pk
+            return True, f"{plan['name']}|{dr}/{lim}|{dl}d", dl, True, pk
         except Exception: pass
     fl = max(0, FREE_LIMIT - ud.get(fk, 0))
-    return (True, f"Free ({fl}/{FREE_LIMIT})", 0, False, "trial") if fl > 0 else (False, "Trial limits exhausted!", 0, False, "trial")
+    return (True, f"Free({fl}/{FREE_LIMIT})", 0, False, "trial") if fl > 0 else (False, "Trial over!", 0, False, "trial")
 
-def feat_free_rem(uid, feat_name):
+def feat_free_rem(uid, fn):
     if is_admin(uid): return 999999
-    return max(0, FREE_LIMIT - get_user(uid).get(f"{feat_name}_free_used", 0))
+    return max(0, FREE_LIMIT - get_user(uid).get(f"{fn}_free_used", 0))
 
-def feat_daily_rem(uid, feat_name):
+def feat_daily_rem(uid, fn):
     if is_admin(uid): return 999999
     ud = get_user(uid); plan = get_plan(ud)
     if plan.get("unlimited"): return 999999
     lim = plan.get("daily_limit", 0)
-    if ud.get(f"{feat_name}_date", "") != date.today().isoformat(): return lim
-    return max(0, lim - ud.get(f"{feat_name}_daily", 0))
+    if ud.get(f"{fn}_date", "") != date.today().isoformat(): return lim
+    return max(0, lim - ud.get(f"{fn}_daily", 0))
 
 def use_feature(uid, feat_name):
     uid = str(uid); ud = get_user(uid); today = date.today().isoformat()
@@ -479,8 +493,7 @@ def _safe_api(fn):
     try: return fn()
     except requests.exceptions.Timeout: return {"ok": False, "error": "⏱️ Timed out!"}
     except requests.exceptions.ConnectionError: return {"ok": False, "error": "🌐 Connection error!"}
-    except requests.exceptions.HTTPError as e: return {"ok": False, "error": f"⚠️ HTTP {e.response.status_code if e.response else 'Error'}"}
-    except Exception as e: logger.error(f"API Error: {e}", exc_info=True); return {"ok": False, "error": f"❌ {e}"}
+    except Exception as e: return {"ok": False, "error": f"❌ {e}"}
 
 def primary_api_call(action, params):
     def c():
@@ -527,13 +540,13 @@ def should_skip_val(v):
 
 def clean_value_text(v):
     if not isinstance(v, str): return v
-    for pat in [r"(?i)📌?\s*dm\s*for\s*buy\s*:\s*@rtfgamming",r"(?i)@rtfgamming",r"(?i)rtfgamming",r"(?i)📌?\s*dm\s*for\s*buy\s*:"]:
+    for pat in [r"(?i)📌?\s*dm\s*for\s*buy\s*:\s*@rtfgamming",r"(?i)@rtfgamming",r"(?i)rtfgamming"]:
         v = re.sub(pat, "", v)
     return v.strip().strip("|").strip("-").strip("•").strip("📌").strip()
 
 def em(k):
     k = str(k).lower()
-    for kw, e in {"name":"👤","holder":"👤","email":"📧","phone":"📞","mobile":"📞","address":"📍","city":"🏙️","state":"🗺️","country":"🌍","pincode":"📮","upi":"💳","vpa":"💳","bank":"🏦","ifsc":"🏦","account":"🏦","dob":"🎂","gender":"🚻","pan":"🪪","aadhar":"🪪","aadhaar":"🪪","father":"👨","mother":"👩","vehicle":"🚗","rc":"🚗","owner":"👤","model":"🚗","fuel":"⛽","engine":"🔧","chassis":"🔧","registration":"📅","insurance":"📋","fitness":"📋","rto":"🏢","branch":"🏦","district":"🗺️","micr":"🔢","swift":"🔢","verified":"✅","valid":"✅","merchant":"🏪","class":"📋","color":"🎨","colour":"🎨","seating":"💺","wheel":"🛞","cylinder":"🔩","weight":"⚖️","norms":"🌿","financer":"💰","permit":"📄","tax":"💵","number":"🔢","plate":"🔢","type":"📋","category":"📋","body":"🚗","manufacturer":"🏭","manufacturing":"📅","purchase":"🛒","hypothecation":"🔗","blacklist":"⚠️","noc":"📄","challan":"🎫","status":"📊","ration":"🍚","card":"💳","family":"👨‍👩‍👧","member":"👥","head":"👤","relation":"🔗","age":"🎂","fps":"🏪","shop":"🏪","scheme":"📋","unit":"🔢","id":"🆔","username":"👤","user_id":"🆔","followers":"👥","following":"👥","bio":"📝","ip":"🌐","isp":"🏢","weather":"🌤️","temp":"🌡️","humidity":"💧","wind":"💨","imei":"📱","device":"📱"}.items():
+    for kw, e in {"name":"👤","holder":"👤","email":"📧","phone":"📞","mobile":"📞","address":"📍","city":"🏙️","state":"🗺️","country":"🌍","pincode":"📮","upi":"💳","vpa":"💳","bank":"🏦","ifsc":"🏦","account":"🏦","dob":"🎂","gender":"🚻","pan":"🪪","aadhar":"🪪","aadhaar":"🪪","father":"👨","mother":"👩","vehicle":"🚗","rc":"🚗","owner":"👤","model":"🚗","fuel":"⛽","engine":"🔧","chassis":"🔧","registration":"📅","insurance":"📋","rto":"🏢","branch":"🏦","district":"🗺️","verified":"✅","valid":"✅","merchant":"🏪","color":"🎨","weight":"⚖️","number":"🔢","manufacturer":"🏭","blacklist":"⚠️","status":"📊","id":"🆔","username":"👤","user_id":"🆔","followers":"👥","bio":"📝","ip":"🌐","isp":"🏢","weather":"🌤️","temp":"🌡️","humidity":"💧","wind":"💨","imei":"📱","device":"📱"}.items():
         if kw in k: return e
     return "📌"
 
@@ -552,7 +565,7 @@ def clean_metadata(data):
 
 def format_universal_result(term, raw_data, icon="🔍"):
     cleaned = clean_metadata(raw_data)
-    if not cleaned: return f"<code>{BANNER_MINI}</code>\n\n{icon} <b>Result for:</b> <code>{html.escape(str(term))}</code>\n\n<i>No records found.</i>"
+    if not cleaned: return f"<code>{BANNER_MINI}</code>\n\n{icon} <b>Result:</b> <code>{html.escape(str(term))}</code>\n\n<i>No records.</i>"
     records = []
     def extract(item):
         if isinstance(item, dict):
@@ -566,16 +579,16 @@ def format_universal_result(term, raw_data, icon="🔍"):
     for r in records:
         fp = "-".join(sorted(f"{k}:{v}" for k, v in r.items() if not isinstance(v, (dict, list))))
         if fp and fp not in seen: seen.add(fp); unique.append(r)
-    if not unique: return f"<code>{BANNER_MINI}</code>\n\n{icon} <b>Result for:</b> <code>{html.escape(str(term))}</code>\n\n<i>No records found.</i>"
-    out = [f"<code>{BANNER_MINI}</code>", f"\n{icon} <b>Search Result:</b> <code>{html.escape(str(term))}</code>", f"📊 <b>{len(unique)} record(s) found</b>", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━"]
+    if not unique: return f"<code>{BANNER_MINI}</code>\n\n{icon} <b>Result:</b> <code>{html.escape(str(term))}</code>\n\n<i>No records.</i>"
+    out = [f"<code>{BANNER_MINI}</code>", f"\n{icon} <b>Result:</b> <code>{html.escape(str(term))}</code>", f"📊 <b>{len(unique)} record(s)</b>", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━"]
     for idx, rec in enumerate(unique, 1):
-        if len(unique) > 1: out.append(f"\n<b>━━ Record #{idx} ━━</b>")
+        if len(unique) > 1: out.append(f"\n<b>━━ #{idx} ━━</b>")
         for k, v in rec.items():
             if isinstance(v, (dict, list)) or should_skip_key(k) or should_skip_val(v): continue
             emoji = em(k); label = str(k).replace("_"," ").replace("-"," ").title(); kl = str(k).lower().strip()
             if isinstance(v, bool): vs = ("Active ✅" if v else "Inactive ❌") if kl in ["valid","verified","active","success"] else ("Yes ✅" if v else "No ❌")
-            elif str(v).lower() == "true": vs = "Active ✅" if kl in ["valid","verified","active","success"] else "Yes ✅"
-            elif str(v).lower() == "false": vs = "Inactive ❌" if kl in ["valid","verified","active","success"] else "No ❌"
+            elif str(v).lower() == "true": vs = "Yes ✅"
+            elif str(v).lower() == "false": vs = "No ❌"
             else: val_str = str(v).strip(); vs = val_str if ("@" in val_str or kl in ["vpa","upi","email","ifsc","code","userid","ip"]) else val_str.title()
             out.append(f"{emoji} <b>{html.escape(label)}:</b> <code>{html.escape(vs)}</code>")
     return "\n".join(out)
@@ -583,16 +596,16 @@ def format_universal_result(term, raw_data, icon="🔍"):
 # ================== 🕹️ KEYBOARDS ==================
 def main_kb(uid):
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📱 Phone Tracker", callback_data="mode_phone"), InlineKeyboardButton("🪪 Aadhaar Lookup", callback_data="mode_aadhaar")],
-        [InlineKeyboardButton("💳 UPI Verification", callback_data="mode_upi"), InlineKeyboardButton("📧 Email OSINT", callback_data="mode_email")],
-        [InlineKeyboardButton("🚗 Vehicle RC", callback_data="mode_vehicle"), InlineKeyboardButton("🏦 Bank IFSC", callback_data="mode_ifsc")],
-        [InlineKeyboardButton("👤 Telegram Info", callback_data="mode_tg"), InlineKeyboardButton("📸 Instagram OSINT", callback_data="mode_insta")],
-        [InlineKeyboardButton("📱 IMEI Tracker", callback_data="mode_imei"), InlineKeyboardButton("📮 Postal Pincode", callback_data="mode_pin")],
-        [InlineKeyboardButton("🌍 Country Info", callback_data="mode_country"), InlineKeyboardButton("💰 Paytm Info", callback_data="mode_paytm")],
-        [InlineKeyboardButton("🌐 IP Lookup", callback_data="mode_ip"), InlineKeyboardButton("🌤️ Weather", callback_data="mode_weather")],
+        [InlineKeyboardButton("📱 Phone", callback_data="mode_phone"), InlineKeyboardButton("🪪 Aadhaar", callback_data="mode_aadhaar")],
+        [InlineKeyboardButton("💳 UPI", callback_data="mode_upi"), InlineKeyboardButton("📧 Email", callback_data="mode_email")],
+        [InlineKeyboardButton("🚗 Vehicle", callback_data="mode_vehicle"), InlineKeyboardButton("🏦 IFSC", callback_data="mode_ifsc")],
+        [InlineKeyboardButton("👤 Telegram", callback_data="mode_tg"), InlineKeyboardButton("📸 Instagram", callback_data="mode_insta")],
+        [InlineKeyboardButton("📱 IMEI", callback_data="mode_imei"), InlineKeyboardButton("📮 Pincode", callback_data="mode_pin")],
+        [InlineKeyboardButton("🌍 Country", callback_data="mode_country"), InlineKeyboardButton("💰 Paytm", callback_data="mode_paytm")],
+        [InlineKeyboardButton("🌐 IP", callback_data="mode_ip"), InlineKeyboardButton("🌤️ Weather", callback_data="mode_weather")],
         [InlineKeyboardButton("🎟️ Redeem", callback_data="redeem_info"), InlineKeyboardButton("👤 Profile", callback_data="profile")],
         [InlineKeyboardButton("📊 Status", callback_data="status"), InlineKeyboardButton("💎 Premium", callback_data="buy")],
-        [InlineKeyboardButton("📢 CH 1", url=f"https://t.me/{FORCE_JOIN_CHANNEL_1.replace('@','')}"), InlineKeyboardButton("📢 CH 2", url=f"https://t.me/{FORCE_JOIN_CHANNEL_2.replace('@','')}")],
+        [InlineKeyboardButton("📢 CH1", url=f"https://t.me/{FORCE_JOIN_CHANNEL_1.replace('@','')}"), InlineKeyboardButton("📢 CH2", url=f"https://t.me/{FORCE_JOIN_CHANNEL_2.replace('@','')}")],
         [InlineKeyboardButton("❓ Help ❓", callback_data="help")]
     ])
 
@@ -619,94 +632,85 @@ def admin_kb():
         [InlineKeyboardButton("🎟️ Create Code", callback_data="admin_redeem_create"), InlineKeyboardButton("📋 Codes", callback_data="admin_redeem_list")],
         [InlineKeyboardButton("🗑️ Del Code", callback_data="admin_redeem_delete")],
         [InlineKeyboardButton("🔧 Maintenance", callback_data="admin_maintenance")],
+        [InlineKeyboardButton("📋 Activity Logs", callback_data="admin_logs")],
         [InlineKeyboardButton("🔙 Menu", callback_data="main_menu")]
     ])
 
+def logs_kb():
+    """Logs sub-menu keyboard"""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📋 Recent 20 Logs", callback_data="logs_recent")],
+        [InlineKeyboardButton("🔍 Search by User ID", callback_data="logs_by_user")],
+        [InlineKeyboardButton("📱 Phone Logs", callback_data="logs_feat_phone"), InlineKeyboardButton("🪪 Aadhaar Logs", callback_data="logs_feat_aadhaar")],
+        [InlineKeyboardButton("💳 UPI Logs", callback_data="logs_feat_upi"), InlineKeyboardButton("🚗 Vehicle Logs", callback_data="logs_feat_vehicle")],
+        [InlineKeyboardButton("👤 TG Logs", callback_data="logs_feat_tg"), InlineKeyboardButton("📸 Insta Logs", callback_data="logs_feat_insta")],
+        [InlineKeyboardButton("📊 Log Stats", callback_data="logs_stats")],
+        [InlineKeyboardButton("🔙 Admin Panel", callback_data="admin_back")]
+    ])
+
 def maintenance_kb():
-    """Maintenance control keyboard for admin"""
     full_status = "🔴 ON" if FULL_MAINTENANCE else "🟢 OFF"
-    buttons = [
-        [InlineKeyboardButton(f"🔧 Full Bot: {full_status}", callback_data="maint_toggle_full")],
-    ]
-    # Per feature toggles - 2 per row
+    buttons = [[InlineKeyboardButton(f"🔧 Full Bot: {full_status}", callback_data="maint_toggle_full")]]
     feat_buttons = []
     for feat in ALL_FEATURE_KEYS:
         st = "🔴" if FEATURE_MAINTENANCE.get(feat, False) else "🟢"
         feat_buttons.append(InlineKeyboardButton(f"{st} {feat.title()}", callback_data=f"maint_toggle_{feat}"))
-    
     for i in range(0, len(feat_buttons), 2):
-        row = feat_buttons[i:i+2]
-        buttons.append(row)
-    
-    buttons.append([InlineKeyboardButton("🔙 Admin Panel", callback_data="admin_back")])
+        buttons.append(feat_buttons[i:i+2])
+    buttons.append([InlineKeyboardButton("🔙 Admin", callback_data="admin_back")])
     return InlineKeyboardMarkup(buttons)
 
 def back_kb(): return InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menu", callback_data="main_menu")]])
 def buy_kb(): return InlineKeyboardMarkup([[InlineKeyboardButton("💬 Buy", url=f"https://t.me/{OWNER_CONTACT.replace('@','')}")], [InlineKeyboardButton("🔙 Menu", callback_data="main_menu")]])
 def plan_kb(pf):
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🥉 7D-₹50", callback_data=f"{pf}_7days")],
-        [InlineKeyboardButton("🥈 30D-₹130", callback_data=f"{pf}_30days")],
-        [InlineKeyboardButton("🥇 6M-₹300", callback_data=f"{pf}_6months")],
-        [InlineKeyboardButton("💎 12M-₹799", callback_data=f"{pf}_12months")],
-        [InlineKeyboardButton("⚙️ Custom", callback_data=f"{pf}_custom")],
-        [InlineKeyboardButton("❌ Cancel", callback_data="admin_back")]
+        [InlineKeyboardButton("🥉 7D-₹50", callback_data=f"{pf}_7days")],[InlineKeyboardButton("🥈 30D-₹130", callback_data=f"{pf}_30days")],
+        [InlineKeyboardButton("🥇 6M-₹300", callback_data=f"{pf}_6months")],[InlineKeyboardButton("💎 12M-₹799", callback_data=f"{pf}_12months")],
+        [InlineKeyboardButton("⚙️ Custom", callback_data=f"{pf}_custom")],[InlineKeyboardButton("❌ Cancel", callback_data="admin_back")]
     ])
 
 # ================== 🚀 START ==================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if not user: return ConversationHandler.END
-    
-    # FULL MAINTENANCE CHECK (blocks non-admins completely)
     if is_full_maintenance() and not is_admin(user.id):
-        if update.callback_query:
-            await safe_edit(update.callback_query, MAINTENANCE_MSG_FULL, back_kb())
-        else:
-            await safe_reply(update, MAINTENANCE_MSG_FULL)
+        if update.callback_query: await safe_edit(update.callback_query, MAINTENANCE_MSG_FULL, back_kb())
+        else: await safe_reply(update, MAINTENANCE_MSG_FULL)
         return ConversationHandler.END
-    
     get_user(user.id); u_name = safe_name(user)
-    
     if not is_admin(user.id):
         if not await check_joined(context, user.id):
-            t = f"<code>{BANNER}</code>\n\n🔴 <b>Force Join Required</b>\n\nWelcome <b>{u_name}</b>!\n\n⚠️ Join both channels:\n📢 {FORCE_JOIN_CHANNEL_1}\n📢 {FORCE_JOIN_CHANNEL_2}\n\nVerify 👇"
+            t = f"<code>{BANNER}</code>\n\n🔴 <b>Force Join Required</b>\n\nWelcome <b>{u_name}</b>!\n\n📢 {FORCE_JOIN_CHANNEL_1}\n📢 {FORCE_JOIN_CHANNEL_2}\n\nVerify 👇"
             if update.callback_query: await safe_edit(update.callback_query, t, force_join_kb())
             else: await safe_reply(update, t, force_join_kb())
             return ConversationHandler.END
-
     if is_admin(user.id):
-        maint_note = "\n🔧 <b>MAINTENANCE MODE: ON</b>\n" if is_full_maintenance() else ""
-        t = f"<code>{BANNER}</code>\n\n👋 Boss <b>{u_name}</b>! 🛡️ <code>ADMIN</code>{maint_note}\n\nAll tools: 💎 ∞\n\n👇 <b>Select tool:</b>"
+        maint_note = "\n🔧 <b>MAINTENANCE: ON</b>\n" if is_full_maintenance() else ""
+        t = f"<code>{BANNER}</code>\n\n👋 Boss <b>{u_name}</b>! 🛡️ <code>ADMIN</code>{maint_note}\n\nAll: 💎 ∞\n\n👇 <b>Select:</b>"
     else:
         ud = get_user(user.id); plan = get_plan(ud); ip = ud.get("is_premium", False); exp = ud.get("expiry", "")
-        status_lines = []
+        lines = []
         for feat in ALL_FEATURE_KEYS[:8]:
-            # Show maintenance status per feature
-            if is_feature_maintenance(feat):
-                status_lines.append(f"🛠️ {feat.title()}: <code>Under Maintenance</code>")
-                continue
+            if is_feature_maintenance(feat): lines.append(f"🛠️ {feat.title()}: <code>Maintenance</code>"); continue
             fl = feat_free_rem(user.id, feat)
             if ip and exp:
                 try:
                     ed = date.fromisoformat(exp); dl = (ed - date.today()).days
                     if dl >= 0:
-                        if plan.get("unlimited"): status_lines.append(f"🟢 {feat.title()}: <code>💎 ∞ ({dl}d)</code>")
-                        else: dr = feat_daily_rem(user.id, feat); status_lines.append(f"🟢 {feat.title()}: <code>💎 {dr}/{plan.get('daily_limit',0)} ({dl}d)</code>")
-                    else: status_lines.append(f"🔴 {feat.title()}: <code>Expired ({fl}/{FREE_LIMIT})</code>")
-                except Exception: status_lines.append(f"⚪ {feat.title()}: <code>Unknown</code>")
-            else: status_lines.append(f"🆓 {feat.title()}: <code>{fl}/{FREE_LIMIT} Free</code>")
-        t = f"<code>{BANNER}</code>\n\n👋 Hello <b>{u_name}</b>!\n\n" + "\n".join(status_lines) + f"\n\n💡 <b>1 Plan = all 14+ tools!</b>\n🎟️ <code>/redeem CODE</code>\n\n👇 <b>Select module:</b>"
-
+                        if plan.get("unlimited"): lines.append(f"🟢 {feat.title()}: <code>💎∞ ({dl}d)</code>")
+                        else: dr = feat_daily_rem(user.id, feat); lines.append(f"🟢 {feat.title()}: <code>💎{dr}/{plan.get('daily_limit',0)} ({dl}d)</code>")
+                    else: lines.append(f"🔴 {feat.title()}: <code>Expired({fl}/{FREE_LIMIT})</code>")
+                except Exception: lines.append(f"⚪ {feat.title()}: <code>Unknown</code>")
+            else: lines.append(f"🆓 {feat.title()}: <code>{fl}/{FREE_LIMIT}</code>")
+        t = f"<code>{BANNER}</code>\n\n👋 <b>{u_name}</b>!\n\n" + "\n".join(lines) + f"\n\n💡 <b>1 Plan = 14+ tools!</b>\n🎟️ <code>/redeem CODE</code>\n\n👇 <b>Select:</b>"
     if update.callback_query: await safe_edit(update.callback_query, t, main_kb(user.id))
     else: await safe_reply(update, t, main_kb(user.id))
     return ConversationHandler.END
 
 async def verify_join(update, context):
     q = update.callback_query; await q.answer("Verifying...")
-    u = q.from_user
-    if await check_joined(context, u.id): await start(update, context)
-    else: await safe_edit(q, f"<code>{BANNER_MINI}</code>\n\n⚠️ <b>Join both channels!</b>\n📢 {FORCE_JOIN_CHANNEL_1}\n📢 {FORCE_JOIN_CHANNEL_2}", force_join_kb())
+    if await check_joined(context, q.from_user.id): await start(update, context)
+    else: await safe_edit(q, f"<code>{BANNER_MINI}</code>\n\n⚠️ <b>Join both!</b>\n📢 {FORCE_JOIN_CHANNEL_1}\n📢 {FORCE_JOIN_CHANNEL_2}", force_join_kb())
 
 async def main_menu_cb(update, context):
     context.user_data.clear()
@@ -717,20 +721,16 @@ async def cancel(update, context):
     context.user_data.clear()
     await safe_reply(update, "❌ Cancelled.", main_kb(update.effective_user.id)); return ConversationHandler.END
 
-# ================== 🛠️ SEARCH EXECUTION (WITH MAINTENANCE CHECK) ==================
+# ================== 🛠️ SEARCH EXECUTION (WITH LOGGING) ==================
 async def execute_search(update, context, feat_name, action, param_key, search_value, icon, display_value):
     u = update.effective_user
-    
-    # Per-feature maintenance check
     if not is_admin(u.id) and is_feature_maintenance(feat_name):
-        await safe_reply(update, maintenance_msg_feature(feat_name), back_kb())
-        return
-    
+        await safe_reply(update, maintenance_msg_feature(feat_name), back_kb()); return
     ok, st, _, _, _ = check_feat_access(u.id, feat_name, feat_name.title())
     if not ok:
-        await safe_reply(update, f"<code>{BANNER_MINI}</code>\n\n🔒 <b>Access Restricted!</b>\n{st}\n\n🎟️ <code>/redeem CODE</code>\n💎 {OWNER_CONTACT}", buy_kb()); return
+        await safe_reply(update, f"<code>{BANNER_MINI}</code>\n\n🔒 <b>Restricted!</b>\n{st}\n\n🎟️ <code>/redeem CODE</code>\n💎 {OWNER_CONTACT}", buy_kb()); return
 
-    msg = await safe_reply(update, "⏳ <i>Initializing Engine...</i>")
+    msg = await safe_reply(update, "⏳ <i>Initializing...</i>")
     api_task = asyncio.get_event_loop().run_in_executor(None, lambda: primary_api_call(action, {param_key: search_value}))
     anim_task = animated_search(msg, icon, display_value)
     res, _ = await asyncio.gather(api_task, anim_task)
@@ -739,44 +739,45 @@ async def execute_search(update, context, feat_name, action, param_key, search_v
     elif not res["ok"] and feat_name == "phone": res = await asyncio.get_event_loop().run_in_executor(None, lambda: backup_phone_api(search_value))
 
     if res["ok"]:
-        use_feature(u.id, feat_name); text = format_universal_result(display_value, res["data"], icon)
-        final = f"⚡ <b>Intelligence Report!</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n{text}"
+        use_feature(u.id, feat_name)
+        # LOG THE ACTIVITY
+        add_activity_log(u.id, u.username, u.first_name, feat_name, display_value, "success")
+        text = format_universal_result(display_value, res["data"], icon)
+        final = f"⚡ <b>Report!</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n{text}"
         if msg: await safe_edit(msg, final, main_kb(u.id))
         else: await safe_reply(update, final, main_kb(u.id))
     else:
-        err = f"<code>{BANNER_MINI}</code>\n\n🔴 <b>Query Failed!</b>\n\n❌ <code>{html.escape(str(display_value))}</code>\n📛 {html.escape(str(res['error']))}\n\n💡 <i>Try again.</i>"
+        # LOG FAILED ATTEMPT TOO
+        add_activity_log(u.id, u.username, u.first_name, feat_name, display_value, "failed")
+        err = f"<code>{BANNER_MINI}</code>\n\n🔴 <b>Failed!</b>\n\n❌ <code>{html.escape(str(display_value))}</code>\n📛 {html.escape(str(res['error']))}"
         if msg: await safe_edit(msg, err, back_kb())
         else: await safe_reply(update, err, back_kb())
 
 async def execute_batch(update, context, feat_name, action, param_key, items, icon):
     u = update.effective_user; total = len(items)
-    msg = await safe_reply(update, f"<code>{BANNER_MINI}</code>\n\n📦 <b>Batch:</b> <b>{total}</b> items\n\n<code>[░░░░░░░░░░░░░░░░░░░░]</code> 0%")
+    msg = await safe_reply(update, f"<code>{BANNER_MINI}</code>\n\n📦 <b>Batch:</b> <b>{total}</b>\n\n<code>[░░░░░░░░░░░░░░░░░░░░]</code> 0%")
     for idx, item in enumerate(items, 1):
         pct = int((idx / total) * 100); filled = int(pct / 5); bar = "█" * filled + "░" * (20 - filled)
-        try: await msg.edit_text(f"<code>{BANNER_MINI}</code>\n\n📦 🔍 <code>{html.escape(str(item))}</code>\n📊 <b>{idx}/{total}</b>\n\n<code>[{bar}]</code> <b>{pct}%</b>", parse_mode="HTML")
+        try: await msg.edit_text(f"<code>{BANNER_MINI}</code>\n\n📦 <code>{html.escape(str(item))}</code>\n📊 <b>{idx}/{total}</b>\n\n<code>[{bar}]</code> <b>{pct}%</b>", parse_mode="HTML")
         except Exception: pass
         res = primary_api_call(action, {param_key: item})
-        if res["ok"]: use_feature(u.id, feat_name); await safe_reply(update, format_universal_result(item, res["data"], icon))
-        else: await safe_reply(update, f"❌ <code>{html.escape(str(item))}</code>: {html.escape(str(res['error']))}")
+        if res["ok"]:
+            use_feature(u.id, feat_name)
+            add_activity_log(u.id, u.username, u.first_name, feat_name, item, "success")
+            await safe_reply(update, format_universal_result(item, res["data"], icon))
+        else:
+            add_activity_log(u.id, u.username, u.first_name, feat_name, item, "failed")
+            await safe_reply(update, f"❌ <code>{html.escape(str(item))}</code>: {html.escape(str(res['error']))}")
         await asyncio.sleep(0.3)
-    if msg: await safe_edit(msg, f"<code>{BANNER_MINI}</code>\n\n⚡ <b>Batch Done!</b> ✅ <b>{total}</b>\n<code>[████████████████████]</code> <b>100%</b>", main_kb(u.id))
+    if msg: await safe_edit(msg, f"<code>{BANNER_MINI}</code>\n\n⚡ <b>Done!</b> ✅ <b>{total}</b>\n<code>[████████████████████]</code> <b>100%</b>", main_kb(u.id))
 
-# ================== 📱 MODE PROMPTERS (WITH MAINTENANCE CHECK) ==================
+# ================== 📱 MODE PROMPTERS ==================
 async def generic_mode_prompt(update, context, feat_name, display_title, icon):
-    q = update.callback_query; await q.answer()
-    u = q.from_user
-    
-    # Full bot maintenance check
-    if not is_admin(u.id) and is_full_maintenance():
-        await safe_edit(q, MAINTENANCE_MSG_FULL, back_kb()); return
-    
-    # Per-feature maintenance check
-    if not is_admin(u.id) and is_feature_maintenance(feat_name):
-        await safe_edit(q, maintenance_msg_feature(feat_name), back_kb()); return
-    
-    if not is_admin(u.id) and not await check_joined(context, u.id):
-        await safe_edit(q, "⚠️ Join required!", force_join_kb()); return
-    await safe_edit(q, f"<code>{BANNER_SEARCH}</code>\n\n{icon} <b>{display_title} OSINT</b> {icon}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nChoose:", search_sub_kb(u.id, feat_name))
+    q = update.callback_query; await q.answer(); u = q.from_user
+    if not is_admin(u.id) and is_full_maintenance(): await safe_edit(q, MAINTENANCE_MSG_FULL, back_kb()); return
+    if not is_admin(u.id) and is_feature_maintenance(feat_name): await safe_edit(q, maintenance_msg_feature(feat_name), back_kb()); return
+    if not is_admin(u.id) and not await check_joined(context, u.id): await safe_edit(q, "⚠️ Join!", force_join_kb()); return
+    await safe_edit(q, f"<code>{BANNER_SEARCH}</code>\n\n{icon} <b>{display_title}</b> {icon}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nChoose:", search_sub_kb(u.id, feat_name))
 
 async def mode_phone(u, c): await generic_mode_prompt(u, c, "phone", "Phone Tracker", "📱")
 async def mode_email(u, c): await generic_mode_prompt(u, c, "email", "Email OSINT", "📧")
@@ -797,11 +798,8 @@ async def mode_weather(u, c): await generic_mode_prompt(u, c, "weather", "Weathe
 def make_handler_pair(feat_name, action, param_key, icon, single_state, batch_state, prompt_single, prompt_batch, validator_fn=None):
     async def single_start(update, context):
         q = update.callback_query; await q.answer()
-        # Maintenance checks
-        if not is_admin(q.from_user.id) and is_full_maintenance():
-            await safe_edit(q, MAINTENANCE_MSG_FULL, back_kb()); return ConversationHandler.END
-        if not is_admin(q.from_user.id) and is_feature_maintenance(feat_name):
-            await safe_edit(q, maintenance_msg_feature(feat_name), back_kb()); return ConversationHandler.END
+        if not is_admin(q.from_user.id) and is_full_maintenance(): await safe_edit(q, MAINTENANCE_MSG_FULL, back_kb()); return ConversationHandler.END
+        if not is_admin(q.from_user.id) and is_feature_maintenance(feat_name): await safe_edit(q, maintenance_msg_feature(feat_name), back_kb()); return ConversationHandler.END
         ok, st, _, _, _ = check_feat_access(q.from_user.id, feat_name, feat_name.title())
         if not ok: await safe_edit(q, f"🔒 {st}", buy_kb()); return ConversationHandler.END
         await safe_edit(q, f"<code>{BANNER_SEARCH}</code>\n\n{icon} <b>{prompt_single}</b>\n\nSend input or /cancel:")
@@ -809,10 +807,8 @@ def make_handler_pair(feat_name, action, param_key, icon, single_state, batch_st
 
     async def batch_start(update, context):
         q = update.callback_query; await q.answer()
-        if not is_admin(q.from_user.id) and is_full_maintenance():
-            await safe_edit(q, MAINTENANCE_MSG_FULL, back_kb()); return ConversationHandler.END
-        if not is_admin(q.from_user.id) and is_feature_maintenance(feat_name):
-            await safe_edit(q, maintenance_msg_feature(feat_name), back_kb()); return ConversationHandler.END
+        if not is_admin(q.from_user.id) and is_full_maintenance(): await safe_edit(q, MAINTENANCE_MSG_FULL, back_kb()); return ConversationHandler.END
+        if not is_admin(q.from_user.id) and is_feature_maintenance(feat_name): await safe_edit(q, maintenance_msg_feature(feat_name), back_kb()); return ConversationHandler.END
         ok, st, _, _, _ = check_feat_access(q.from_user.id, feat_name, feat_name.title())
         if not ok: await safe_edit(q, f"🔒 {st}", buy_kb()); return ConversationHandler.END
         await safe_edit(q, f"<code>{BANNER_SEARCH}</code>\n\n{icon} <b>{prompt_batch}</b>\n\nComma-separated (Max 15) or /cancel:")
@@ -821,53 +817,49 @@ def make_handler_pair(feat_name, action, param_key, icon, single_state, batch_st
     async def single_process(update, context):
         raw = update.message.text.strip()
         val = validator_fn(raw) if validator_fn else raw
-        if not val: await safe_reply(update, "❌ Invalid! Try again or /cancel:"); return single_state
+        if not val: await safe_reply(update, "❌ Invalid! /cancel:"); return single_state
         await execute_search(update, context, feat_name, action, param_key, val, icon, val); return ConversationHandler.END
 
     async def batch_process(update, context):
         raw_list = [x.strip() for x in update.message.text.split(",") if x.strip()]
         valid_items = [validator_fn(x) if validator_fn else x for x in raw_list]
         valid_items = [x for x in valid_items if x][:15]
-        if not valid_items: await safe_reply(update, "❌ No valid entries! Try again or /cancel:"); return batch_state
+        if not valid_items: await safe_reply(update, "❌ No valid! /cancel:"); return batch_state
         await execute_batch(update, context, feat_name, action, param_key, valid_items, icon); return ConversationHandler.END
-
     return single_start, batch_start, single_process, batch_process
 
 def clean_num(x):
     c = x.replace(" ","").replace("-","").replace("+","")
     return c if c.isdigit() and 7 <= len(c) <= 15 else None
-
 def clean_aadhaar(x):
     c = x.replace(" ","").replace("-","")
     return c if c.isdigit() and len(c) == 12 else None
-
 def clean_rc(x):
     c = x.upper().replace(" ","").replace("-","")
     return c if len(c) >= 4 else None
-
 def clean_ifsc(x):
     c = x.upper().replace(" ","")
     return c if len(c) == 11 else None
 
-(p_ss, p_bs, p_sp, p_bp) = make_handler_pair("phone","num","number","📱",PHONE_SINGLE,PHONE_BATCH,"Enter Phone Number:","Enter Phone Numbers (comma-separated):",clean_num)
-(e_ss, e_bs, e_sp, e_bp) = make_handler_pair("email","email","email","📧",EMAIL_SINGLE,EMAIL_BATCH,"Enter Email:","Enter Emails (comma-separated):",lambda x: x.strip() if "@" in x else None)
-(u_ss, u_bs, u_sp, u_bp) = make_handler_pair("upi","upiinfo","upi","💳",UPI_SINGLE,UPI_BATCH,"Enter UPI ID:","Enter UPI IDs (comma-separated):",lambda x: x.strip() if "@" in x else None)
-(a_ss, a_bs, a_sp, a_bp) = make_handler_pair("aadhaar","aadhar","aadhar","🪪",AADHAAR_SINGLE,AADHAAR_BATCH,"Enter 12-Digit Aadhaar:","Enter Aadhaars (comma-separated):",clean_aadhaar)
-(v_ss, v_bs, v_sp, v_bp) = make_handler_pair("vehicle","vehicle-v1","rc","🚗",VEHICLE_SINGLE,VEHICLE_BATCH,"Enter Vehicle RC:","Enter RCs (comma-separated):",clean_rc)
-(i_ss, i_bs, i_sp, i_bp) = make_handler_pair("ifsc","ifsc-info","ifsc","🏦",IFSC_SINGLE,IFSC_BATCH,"Enter IFSC Code:","Enter IFSCs (comma-separated):",clean_ifsc)
-(tg_ss, tg_bs, tg_sp, tg_bp) = make_handler_pair("tg","tg-registration","userid","👤",TG_SINGLE,TG_BATCH,"Enter Telegram User ID:","Enter TG IDs (comma-separated):",lambda x: x.strip() if x.strip().isdigit() else None)
-(in_ss, in_bs, in_sp, in_bp) = make_handler_pair("insta","instagram-user","username","📸",INSTA_SINGLE,INSTA_BATCH,"Enter Instagram Username:","Enter Usernames (comma-separated):",lambda x: x.strip().lstrip("@"))
-(im_ss, im_bs, im_sp, im_bp) = make_handler_pair("imei","imei-info","imei_num","📱",IMEI_SINGLE,IMEI_BATCH,"Enter IMEI Number:","Enter IMEIs (comma-separated):",lambda x: x.strip() if x.strip().isdigit() else None)
-(pin_ss, pin_bs, pin_sp, pin_bp) = make_handler_pair("pin","pincode-info","pincode","📮",PIN_SINGLE,PIN_BATCH,"Enter Pincode:","Enter Pincodes (comma-separated):",lambda x: x.strip() if len(x.strip())==6 else None)
-(c_ss, c_bs, c_sp, c_bp) = make_handler_pair("country","country-info","name","🌍",COUNTRY_SINGLE,COUNTRY_BATCH,"Enter Country Name:","Enter Countries (comma-separated):",lambda x: x.strip())
-(pm_ss, pm_bs, pm_sp, pm_bp) = make_handler_pair("paytm","paytm","info","💰",PAYTM_SINGLE,PAYTM_BATCH,"Enter Paytm Number:","Enter Numbers (comma-separated):",clean_num)
-(ip_ss, ip_bs, ip_sp, ip_bp) = make_handler_pair("ip","ip-v1","query","🌐",IP_SINGLE,IP_BATCH,"Enter IP Address:","Enter IPs (comma-separated):",lambda x: x.strip())
-(w_ss, w_bs, w_sp, w_bp) = make_handler_pair("weather","weather","search","🌤️",WEATHER_SINGLE,WEATHER_BATCH,"Enter City Name:","Enter Cities (comma-separated):",lambda x: x.strip().title())
+(p_ss, p_bs, p_sp, p_bp) = make_handler_pair("phone","num","number","📱",PHONE_SINGLE,PHONE_BATCH,"Enter Phone:","Phones (comma-sep):",clean_num)
+(e_ss, e_bs, e_sp, e_bp) = make_handler_pair("email","email","email","📧",EMAIL_SINGLE,EMAIL_BATCH,"Enter Email:","Emails (comma-sep):",lambda x: x.strip() if "@" in x else None)
+(u_ss, u_bs, u_sp, u_bp) = make_handler_pair("upi","upiinfo","upi","💳",UPI_SINGLE,UPI_BATCH,"Enter UPI:","UPIs (comma-sep):",lambda x: x.strip() if "@" in x else None)
+(a_ss, a_bs, a_sp, a_bp) = make_handler_pair("aadhaar","aadhar","aadhar","🪪",AADHAAR_SINGLE,AADHAAR_BATCH,"Enter Aadhaar:","Aadhaars (comma-sep):",clean_aadhaar)
+(v_ss, v_bs, v_sp, v_bp) = make_handler_pair("vehicle","vehicle-v1","rc","🚗",VEHICLE_SINGLE,VEHICLE_BATCH,"Enter RC:","RCs (comma-sep):",clean_rc)
+(i_ss, i_bs, i_sp, i_bp) = make_handler_pair("ifsc","ifsc-info","ifsc","🏦",IFSC_SINGLE,IFSC_BATCH,"Enter IFSC:","IFSCs (comma-sep):",clean_ifsc)
+(tg_ss, tg_bs, tg_sp, tg_bp) = make_handler_pair("tg","tg-registration","userid","👤",TG_SINGLE,TG_BATCH,"Enter TG ID:","TG IDs (comma-sep):",lambda x: x.strip() if x.strip().isdigit() else None)
+(in_ss, in_bs, in_sp, in_bp) = make_handler_pair("insta","instagram-user","username","📸",INSTA_SINGLE,INSTA_BATCH,"Enter Username:","Usernames (comma-sep):",lambda x: x.strip().lstrip("@"))
+(im_ss, im_bs, im_sp, im_bp) = make_handler_pair("imei","imei-info","imei_num","📱",IMEI_SINGLE,IMEI_BATCH,"Enter IMEI:","IMEIs (comma-sep):",lambda x: x.strip() if x.strip().isdigit() else None)
+(pin_ss, pin_bs, pin_sp, pin_bp) = make_handler_pair("pin","pincode-info","pincode","📮",PIN_SINGLE,PIN_BATCH,"Enter Pincode:","Pincodes (comma-sep):",lambda x: x.strip() if len(x.strip())==6 else None)
+(c_ss, c_bs, c_sp, c_bp) = make_handler_pair("country","country-info","name","🌍",COUNTRY_SINGLE,COUNTRY_BATCH,"Enter Country:","Countries (comma-sep):",lambda x: x.strip())
+(pm_ss, pm_bs, pm_sp, pm_bp) = make_handler_pair("paytm","paytm","info","💰",PAYTM_SINGLE,PAYTM_BATCH,"Enter Paytm No:","Numbers (comma-sep):",clean_num)
+(ip_ss, ip_bs, ip_sp, ip_bp) = make_handler_pair("ip","ip-v1","query","🌐",IP_SINGLE,IP_BATCH,"Enter IP:","IPs (comma-sep):",lambda x: x.strip())
+(w_ss, w_bs, w_sp, w_bp) = make_handler_pair("weather","weather","search","🌤️",WEATHER_SINGLE,WEATHER_BATCH,"Enter City:","Cities (comma-sep):",lambda x: x.strip().title())
 
 # ================== 👤 PROFILE / STATUS / HELP / BUY ==================
 async def profile(update, context):
-    q = update.callback_query; await q.answer(); u = q.from_user; ud = get_user(u.id); plan = get_plan(ud); ts = ud.get("total_searches",0); rc = ud.get("redeemed_codes",[])
-    txt = f"<code>{BANNER_MINI}</code>\n\n👤 <b>PROFILE</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n🆔 <code>{u.id}</code>\n👤 <b>{safe_name(u)}</b>\n📦 <b>{plan['name']}</b>\n📅 <code>{ud.get('expiry','Free')}</code>\n🔍 <code>{ts}</code>\n🎟️ <code>{len(rc)}</code> redeemed"
+    q = update.callback_query; await q.answer(); u = q.from_user; ud = get_user(u.id); plan = get_plan(ud)
+    txt = f"<code>{BANNER_MINI}</code>\n\n👤 <b>PROFILE</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n🆔 <code>{u.id}</code>\n👤 <b>{safe_name(u)}</b>\n📦 <b>{plan['name']}</b>\n📅 <code>{ud.get('expiry','Free')}</code>\n🔍 <code>{ud.get('total_searches',0)}</code>\n🎟️ <code>{len(ud.get('redeemed_codes',[]))}</code>"
     await safe_edit(q, txt, back_kb())
 
 async def status_check(update, context):
@@ -875,81 +867,189 @@ async def status_check(update, context):
     if is_admin(u.id): await safe_edit(q, f"<code>{BANNER_MINI}</code>\n\n🛡️ <code>ADMIN</code> — All ∞", back_kb()); return
     lines = []
     for feat in ALL_FEATURE_KEYS:
-        if is_feature_maintenance(feat): lines.append(f"• <b>{feat.title()}</b>: <code>🛠️ Maintenance</code>"); continue
-        ok, st, _, ip, _ = check_feat_access(u.id, feat, feat.title())
+        if is_feature_maintenance(feat): lines.append(f"• <b>{feat.title()}</b>: <code>🛠️ Maint</code>"); continue
+        ok, st, _, _, _ = check_feat_access(u.id, feat, feat.title())
         lines.append(f"• <b>{feat.title()}</b>: <code>{st}</code>")
-    txt = f"<code>{BANNER_MINI}</code>\n\n📊 <b>STATUS</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n" + "\n".join(lines) + f"\n\n💰 {OWNER_CONTACT}\n🆔 <code>{u.id}</code>"
-    await safe_edit(q, txt, back_kb())
+    await safe_edit(q, f"<code>{BANNER_MINI}</code>\n\n📊 <b>STATUS</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n" + "\n".join(lines) + f"\n\n💰 {OWNER_CONTACT}\n🆔 <code>{u.id}</code>", back_kb())
 
 async def help_menu(update, context):
     q = update.callback_query; await q.answer()
-    txt = f"<code>{BANNER}</code>\n\n❓ <b>HELP</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n🎯 <b>14+ OSINT Tools</b>\n📱 Phone | 🪪 Aadhaar | 💳 UPI | 🚗 Vehicle\n🏦 IFSC | 👤 Telegram | 📸 Instagram\n📱 IMEI | 📮 Pincode | 🌍 Country\n💰 Paytm | 🌐 IP | 🌤️ Weather\n\n💎 7D-₹50 | 30D-₹130 | 6M-₹300 | 12M-₹799\n\n🎟️ <code>/redeem CODE</code>"
-    await safe_edit(q, txt, back_kb())
+    await safe_edit(q, f"<code>{BANNER}</code>\n\n❓ <b>HELP</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n🎯 <b>14+ Tools</b>\n📱 Phone | 🪪 Aadhaar | 💳 UPI | 🚗 Vehicle\n🏦 IFSC | 👤 TG | 📸 Insta | 📱 IMEI\n📮 Pincode | 🌍 Country | 💰 Paytm | 🌐 IP | 🌤️ Weather\n\n💎 7D-₹50 | 30D-₹130 | 6M-₹300 | 12M-₹799\n🎟️ <code>/redeem CODE</code>", back_kb())
 
 async def buy(update, context):
-    q = update.callback_query; await q.answer(); u = q.from_user
-    txt = f"<code>{BANNER}</code>\n\n💎 <b>PREMIUM</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n🥉 7 Days - ₹50 (10/day)\n🥈 30 Days - ₹130 (20/day)\n🥇 6 Months - ₹300 (35/day)\n💎 12 Months - ₹799 (∞)\n\n📲 {OWNER_CONTACT}\n🆔 <code>{u.id}</code>"
-    await safe_edit(q, txt, buy_kb())
+    q = update.callback_query; await q.answer()
+    await safe_edit(q, f"<code>{BANNER}</code>\n\n💎 <b>PREMIUM</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n🥉 7D-₹50 (10/day)\n🥈 30D-₹130 (20/day)\n🥇 6M-₹300 (35/day)\n💎 12M-₹799 (∞)\n\n📲 {OWNER_CONTACT}\n🆔 <code>{q.from_user.id}</code>", buy_kb())
 
 async def redeem_command(update, context):
     user = update.effective_user
     if not user: return
     if not context.args: await safe_reply(update, f"<code>{BANNER_MINI}</code>\n\n🎟️ <code>/redeem CODE</code>", back_kb()); return
-    code = context.args[0].upper().strip()
-    ok, msg = use_redeem_code(code, user.id)
+    ok, msg = use_redeem_code(context.args[0].upper().strip(), user.id)
     await safe_reply(update, f"<code>{BANNER_MINI}</code>\n\n{msg}", main_kb(user.id))
 
 async def redeem_info(update, context):
     q = update.callback_query; await q.answer()
-    await safe_edit(q, f"<code>{BANNER_SEARCH}</code>\n\n🎟️ <b>Redeem Promo</b>\n\n<code>/redeem CODE</code>\nExample: <code>/redeem LEGITBONUS</code>", back_kb())
+    await safe_edit(q, f"<code>{BANNER_SEARCH}</code>\n\n🎟️ <b>Redeem</b>\n\n<code>/redeem CODE</code>", back_kb())
 
 # ================== 👑 ADMIN PANEL ==================
 async def admin_panel(update, context):
     if not is_admin(update.effective_user.id): await safe_reply(update, "❌ Admin only!"); return ConversationHandler.END
     users = load_users(); t = len(users); p = sum(1 for v in users.values() if v.get("is_premium"))
     maint_status = "🔴 ON" if FULL_MAINTENANCE else "🟢 OFF"
-    feat_maint_count = sum(1 for f in ALL_FEATURE_KEYS if FEATURE_MAINTENANCE.get(f, False))
-    txt = f"<code>{BANNER_MINI}</code>\n\n🛠️ <b>ADMIN DASHBOARD</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n🛡️ Admins: <code>{len(ADMIN_IDS)}</code>\n👥 Users: <code>{t}</code>\n💎 Premium: <code>{p}</code>\n🆓 Free: <code>{t-p}</code>\n🎟️ Codes: <code>{len(list_redeem_codes())}</code>\n\n🔧 Full Maintenance: <b>{maint_status}</b>\n🛠️ Features Under Maintenance: <code>{feat_maint_count}</code>"
+    feat_maint = sum(1 for f in ALL_FEATURE_KEYS if FEATURE_MAINTENANCE.get(f, False))
+    txt = f"<code>{BANNER_MINI}</code>\n\n🛠️ <b>ADMIN</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n🛡️ <code>{len(ADMIN_IDS)}</code> | 👥 <code>{t}</code> | 💎 <code>{p}</code> | 🆓 <code>{t-p}</code>\n🎟️ <code>{len(list_redeem_codes())}</code> | 📋 Logs: <code>{len(ACTIVITY_LOGS)}</code>\n🔧 Full: <b>{maint_status}</b> | 🛠️ Features: <code>{feat_maint}</code>"
     if update.callback_query: await safe_edit(update.callback_query, txt, admin_kb())
     else: await safe_reply(update, txt, admin_kb())
     return ConversationHandler.END
 
 async def admin_back(u, c): await admin_panel(u, c)
 
+# ================== 📋 ADMIN LOGS HANDLERS ==================
+async def admin_logs_menu(update, context):
+    """Show logs sub-menu"""
+    q = update.callback_query; await q.answer()
+    if not is_admin(q.from_user.id): return
+    total_logs = len(ACTIVITY_LOGS)
+    txt = (
+        f"<code>{BANNER_MINI}</code>\n\n"
+        f"📋 <b>ACTIVITY LOGS CENTER</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"📊 Total Logs Stored: <code>{total_logs}</code>\n"
+        f"💾 Max Capacity: <code>200</code>\n\n"
+        f"👇 <b>Select log view:</b>"
+    )
+    await safe_edit(q, txt, logs_kb())
+
+async def logs_recent(update, context):
+    """Show recent 20 logs"""
+    q = update.callback_query; await q.answer()
+    if not is_admin(q.from_user.id): return
+    logs = get_recent_logs(20)
+    txt = format_logs_text(logs, "📋 RECENT 20 ACTIVITY LOGS")
+    await safe_edit(q, txt, InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔄 Refresh", callback_data="logs_recent")],
+        [InlineKeyboardButton("🔙 Logs Menu", callback_data="admin_logs")]
+    ]))
+
+async def logs_by_user_start(update, context):
+    """Ask for user ID to search logs"""
+    q = update.callback_query; await q.answer()
+    if not is_admin(q.from_user.id): return ConversationHandler.END
+    await safe_edit(q, f"<code>{BANNER_MINI}</code>\n\n🔍 <b>SEARCH USER LOGS</b>\n\nEnter User's Telegram ID or /cancel:")
+    return ADMIN_LOGS_USER_ID
+
+async def logs_by_user_process(update, context):
+    """Process user ID and show their logs"""
+    uid_text = update.message.text.strip()
+    if not uid_text.isdigit():
+        await safe_reply(update, "❌ Invalid ID! Enter numbers or /cancel:")
+        return ADMIN_LOGS_USER_ID
+    
+    uid = int(uid_text)
+    logs = get_user_logs(uid, 15)
+    
+    if not logs:
+        txt = f"<code>{BANNER_MINI}</code>\n\n📭 <b>No logs found for user</b> <code>{uid}</code>"
+    else:
+        uname = logs[0].get("username", "N/A")
+        fname = logs[0].get("first_name", "Unknown")
+        txt = format_logs_text(logs, f"📋 LOGS FOR {fname} (@{uname}) [{uid}]")
+    
+    await safe_reply(update, txt, InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔙 Logs Menu", callback_data="admin_logs")],
+        [InlineKeyboardButton("🔙 Admin", callback_data="admin_back")]
+    ]))
+    return ConversationHandler.END
+
+async def logs_by_feature(update, context):
+    """Show logs for a specific feature"""
+    q = update.callback_query; await q.answer()
+    if not is_admin(q.from_user.id): return
+    
+    data = q.data  # e.g. "logs_feat_phone"
+    feat = data.replace("logs_feat_", "")
+    
+    if feat not in ALL_FEATURE_KEYS:
+        await safe_edit(q, "❌ Invalid feature.", logs_kb())
+        return
+    
+    logs = get_feature_logs(feat, 15)
+    txt = format_logs_text(logs, f"📋 {feat.upper()} FEATURE LOGS")
+    
+    await safe_edit(q, txt, InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔄 Refresh", callback_data=f"logs_feat_{feat}")],
+        [InlineKeyboardButton("🔙 Logs Menu", callback_data="admin_logs")]
+    ]))
+
+async def logs_stats(update, context):
+    """Show log statistics"""
+    q = update.callback_query; await q.answer()
+    if not is_admin(q.from_user.id): return
+    
+    logs = list(ACTIVITY_LOGS)
+    total = len(logs)
+    success = sum(1 for l in logs if l["status"] == "success")
+    failed = sum(1 for l in logs if l["status"] == "failed")
+    
+    # Feature breakdown
+    feat_counts = {}
+    for l in logs:
+        feat = l["feature"]
+        feat_counts[feat] = feat_counts.get(feat, 0) + 1
+    
+    # Unique users
+    unique_users = len(set(l["user_id"] for l in logs))
+    
+    # Top features
+    top_feats = sorted(feat_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+    
+    top_txt = "\n".join(f"  • <b>{f.title()}</b>: <code>{c}</code>" for f, c in top_feats) if top_feats else "  <i>No data</i>"
+    
+    txt = (
+        f"<code>{BANNER_MINI}</code>\n\n"
+        f"📊 <b>LOG STATISTICS</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"📋 Total Logs: <code>{total}</code>\n"
+        f"✅ Successful: <code>{success}</code>\n"
+        f"❌ Failed: <code>{failed}</code>\n"
+        f"👥 Unique Users: <code>{unique_users}</code>\n\n"
+        f"🔝 <b>Top Features:</b>\n{top_txt}\n\n"
+        f"📅 <code>{datetime.now(IST).strftime('%d-%m-%Y %H:%M IST')}</code>"
+    )
+    
+    await safe_edit(q, txt, InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔄 Refresh", callback_data="logs_stats")],
+        [InlineKeyboardButton("🔙 Logs Menu", callback_data="admin_logs")]
+    ]))
+
 # ================== 🔧 MAINTENANCE HANDLERS ==================
 async def admin_maintenance(update, context):
     q = update.callback_query; await q.answer()
     if not is_admin(q.from_user.id): return
-    txt = f"<code>{BANNER_MINI}</code>\n\n🔧 <b>MAINTENANCE CONTROL</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n{get_maintenance_status()}\n\n👇 <b>Toggle any option:</b>"
+    txt = f"<code>{BANNER_MINI}</code>\n\n🔧 <b>MAINTENANCE</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n{get_maintenance_status()}\n\n👇 <b>Toggle:</b>"
     await safe_edit(q, txt, maintenance_kb())
 
 async def maint_toggle_handler(update, context):
     q = update.callback_query; await q.answer()
     if not is_admin(q.from_user.id): return
     data = q.data
-    
-    if data == "maint_toggle_full":
-        new_state = toggle_full_maintenance()
-        logger.info(f"Full Maintenance toggled to: {new_state} by admin {q.from_user.id}")
+    if data == "maint_toggle_full": toggle_full_maintenance()
     elif data.startswith("maint_toggle_"):
         feat = data.replace("maint_toggle_", "")
-        if feat in ALL_FEATURE_KEYS:
-            new_state = toggle_feature_maintenance(feat)
-            logger.info(f"Feature '{feat}' Maintenance toggled to: {new_state} by admin {q.from_user.id}")
-    
-    # Refresh the maintenance panel
-    txt = f"<code>{BANNER_MINI}</code>\n\n🔧 <b>MAINTENANCE CONTROL</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n{get_maintenance_status()}\n\n👇 <b>Toggle any option:</b>"
+        if feat in ALL_FEATURE_KEYS: toggle_feature_maintenance(feat)
+    txt = f"<code>{BANNER_MINI}</code>\n\n🔧 <b>MAINTENANCE</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n{get_maintenance_status()}\n\n👇 <b>Toggle:</b>"
     await safe_edit(q, txt, maintenance_kb())
 
-# ================== ADMIN PLAN HANDLERS ==================
+# ================== ADMIN PLAN + PROMO HANDLERS ==================
+# (Same as your existing code - keeping compact)
 async def adm_add_s(u, c):
     q = u.callback_query; await q.answer()
     if not is_admin(q.from_user.id): return ConversationHandler.END
-    await safe_edit(q, "➕ <b>Enter User ID:</b> (or /cancel)"); return ADMIN_ADD_ID
+    await safe_edit(q, "➕ <b>User ID:</b> /cancel"); return ADMIN_ADD_ID
 
 async def adm_add_id(u, c):
     uid = u.message.text.strip()
-    if not uid.isdigit(): await safe_reply(u, "❌ Invalid! /cancel:"); return ADMIN_ADD_ID
+    if not uid.isdigit(): await safe_reply(u, "❌ Invalid!"); return ADMIN_ADD_ID
     c.user_data["admin_uid"] = uid; await safe_reply(u, f"User: <code>{uid}</code>\nPlan:", plan_kb("plan")); return ADMIN_ADD_PLAN
 
 async def adm_add_plan(u, c):
@@ -958,25 +1058,25 @@ async def adm_add_plan(u, c):
     pm = {"plan_7days":"7days","plan_30days":"30days","plan_6months":"6months","plan_12months":"12months"}
     pk = pm.get(q.data, "7days"); uid = c.user_data.get("admin_uid"); plan = PLANS.get(pk)
     exp = upgrade(int(uid), pk); dl = "∞" if plan["unlimited"] else f"{plan['daily_limit']}/day"
-    await safe_edit(q, f"✅ <b>Activated!</b>\n🆔 <code>{uid}</code>\n📦 <b>{plan['name']}</b>\n📅 <code>{exp}</code>\n⚡ <code>{dl}</code>", admin_kb()); return ConversationHandler.END
+    await safe_edit(q, f"✅ <b>Done!</b>\n🆔 <code>{uid}</code>\n📦 <b>{plan['name']}</b>\n📅 <code>{exp}</code>\n⚡ <code>{dl}</code>", admin_kb()); return ConversationHandler.END
 
 async def adm_rem_s(u, c):
     q = u.callback_query; await q.answer()
     if not is_admin(q.from_user.id): return ConversationHandler.END
-    await safe_edit(q, "❌ <b>Enter User ID to remove:</b> (or /cancel)"); return ADMIN_REM_ID
+    await safe_edit(q, "❌ <b>User ID to remove:</b> /cancel"); return ADMIN_REM_ID
 
 async def adm_rem_p(u, c):
-    uid = u.message.text.strip(); delete_user(uid)
-    await safe_reply(u, f"✅ <code>{uid}</code> removed!", admin_kb()); return ConversationHandler.END
+    delete_user(u.message.text.strip())
+    await safe_reply(u, f"✅ Removed!", admin_kb()); return ConversationHandler.END
 
 async def adm_sp_s(u, c):
     q = u.callback_query; await q.answer()
     if not is_admin(q.from_user.id): return ConversationHandler.END
-    await safe_edit(q, "📅 <b>Enter User ID:</b> (or /cancel)"); return ADMIN_EXP_ID
+    await safe_edit(q, "📅 <b>User ID:</b> /cancel"); return ADMIN_EXP_ID
 
 async def adm_sp_id(u, c):
-    uid = u.message.text.strip(); c.user_data["admin_uid"] = uid
-    await safe_reply(u, f"User: <code>{uid}</code>\nPlan:", plan_kb("plan")); return ADMIN_EXP_PLAN
+    c.user_data["admin_uid"] = u.message.text.strip()
+    await safe_reply(u, f"Plan:", plan_kb("plan")); return ADMIN_EXP_PLAN
 
 async def adm_sp_set(u, c):
     q = u.callback_query; await q.answer()
@@ -992,11 +1092,11 @@ async def adm_list(u, c):
     users = load_users()
     if not users: await safe_edit(q, "📋 No users.", admin_kb()); return
     txt = f"<code>{BANNER_MINI}</code>\n\n📋 <b>USERS ({len(users)})</b>\n\n"
-    for uid, info in list(users.items())[-30:]:
+    for uid, info in list(users.items())[-25:]:
         ts = info.get("total_searches",0)
         if int(uid) in ADMIN_IDS: st = "🛡️"
         elif info.get("is_premium") and info.get("expiry"):
-            try: ed = date.fromisoformat(info["expiry"]); st = f"💎{(ed-date.today()).days}d" if date.today() <= ed else "🔴Exp"
+            try: ed = date.fromisoformat(info["expiry"]); st = f"💎{(ed-date.today()).days}d" if date.today() <= ed else "🔴"
             except Exception: st = "⚪"
         else: st = "🆓"
         txt += f"<code>{uid}</code>|{st}|🔍<code>{ts}</code>\n"
@@ -1007,23 +1107,22 @@ async def adm_stats(u, c):
     if not is_admin(q.from_user.id): return
     users = load_users(); ts = sum(v.get("total_searches",0) for v in users.values())
     act = sum(1 for u2, v in users.items() if v.get("is_premium") and int(u2) not in ADMIN_IDS)
-    txt = f"<code>{BANNER_MINI}</code>\n\n📊 <b>STATS</b>\n\n👥 <code>{len(users)}</code> | 🔍 <code>{ts}</code> | 💎 <code>{act}</code> | 🎟️ <code>{len(list_redeem_codes())}</code>\n📅 <code>{datetime.now(timezone(timedelta(hours=5,minutes=30))).strftime('%d-%m-%Y %H:%M')}</code>"
-    await safe_edit(q, txt, admin_kb())
+    await safe_edit(q, f"<code>{BANNER_MINI}</code>\n\n📊 <b>STATS</b>\n\n👥<code>{len(users)}</code> | 🔍<code>{ts}</code> | 💎<code>{act}</code> | 🎟️<code>{len(list_redeem_codes())}</code> | 📋<code>{len(ACTIVITY_LOGS)}</code>\n📅 <code>{datetime.now(IST).strftime('%d-%m-%Y %H:%M')}</code>", admin_kb())
 
 async def adm_monitor(u, c):
     q = u.callback_query; await q.answer()
     if not is_admin(q.from_user.id): return
     users = load_users(); free = [v for u2, v in users.items() if not v.get("is_premium") and int(u2) not in ADMIN_IDS]
-    await safe_edit(q, f"<code>{BANNER_MINI}</code>\n\n🆓 <b>FREE MONITOR</b>\n👥 <code>{len(free)}</code>", admin_kb())
+    await safe_edit(q, f"<code>{BANNER_MINI}</code>\n\n🆓 <b>FREE:</b> <code>{len(free)}</code>", admin_kb())
 
 async def bc_start(u, c):
     q = u.callback_query; await q.answer()
     if not is_admin(q.from_user.id): return ConversationHandler.END
-    await safe_edit(q, f"<code>{BANNER_MINI}</code>\n\n📢 <b>BROADCAST</b>\n\nSend message or /cancel:"); return ADMIN_BROADCAST_MSG
+    await safe_edit(q, f"📢 <b>BROADCAST</b>\nSend msg or /cancel:"); return ADMIN_BROADCAST_MSG
 
 async def bc_msg(u, c):
-    m = u.message.text.strip(); c.user_data["bc"] = m; users = load_users()
-    await safe_reply(u, f"📢 <b>Preview:</b>\n\n{html.escape(m)}\n\n👥 <b>{len(users)}</b> users\nConfirm?",
+    m = u.message.text.strip(); c.user_data["bc"] = m
+    await safe_reply(u, f"📢 <b>Preview:</b>\n\n{html.escape(m)}\n\n👥 <b>{len(load_users())}</b>\nConfirm?",
         InlineKeyboardMarkup([[InlineKeyboardButton("✅ Send", callback_data="broadcast_confirm")],[InlineKeyboardButton("❌ Cancel", callback_data="broadcast_cancel")]]))
     return ADMIN_BROADCAST_CONFIRM
 
@@ -1032,7 +1131,7 @@ async def bc_confirm(u, c):
     if q.data == "broadcast_cancel": await safe_edit(q, "❌ Cancelled.", admin_kb()); c.user_data.pop("bc",None); return ConversationHandler.END
     msg = c.user_data.get("bc",""); users = load_users(); total = len(users)
     bt = f"<code>{BANNER_MINI}</code>\n\n📢 <b>ANNOUNCEMENT</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━\n\n{html.escape(msg)}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━\n💬 {OWNER_CONTACT}"
-    sm = await safe_reply(u, f"🚀 Broadcasting to <b>{total}</b>..."); s, f2, b, ct = 0, 0, 0, 0
+    sm = await safe_reply(u, f"🚀 <b>{total}</b>..."); s, f2, b, ct = 0, 0, 0, 0
     for uid in users:
         ct += 1
         try: await c.bot.send_message(chat_id=int(uid), text=bt, parse_mode="HTML"); s += 1
@@ -1040,61 +1139,61 @@ async def bc_confirm(u, c):
             if any(w in str(e).lower() for w in ["blocked","forbidden","not found"]): b += 1
             else: f2 += 1
         if ct % 15 == 0 or ct == total:
-            try: await sm.edit_text(f"🚀 <code>{ct}/{total}</code> | ✅<code>{s}</code> | 🚫<code>{b}</code> | ❌<code>{f2}</code>", parse_mode="HTML")
+            try: await sm.edit_text(f"🚀 <code>{ct}/{total}</code>|✅<code>{s}</code>|🚫<code>{b}</code>|❌<code>{f2}</code>", parse_mode="HTML")
             except Exception: pass
-    await safe_reply(u, f"✅ <b>Done!</b>\n👥<code>{total}</code> | ✅<code>{s}</code> | 🚫<code>{b}</code> | ❌<code>{f2}</code>", admin_kb()); c.user_data.pop("bc",None); return ConversationHandler.END
+    await safe_reply(u, f"✅ <b>Done!</b> 👥<code>{total}</code>|✅<code>{s}</code>|🚫<code>{b}</code>|❌<code>{f2}</code>", admin_kb())
+    c.user_data.pop("bc",None); return ConversationHandler.END
 
 async def custom_s(u, c):
     q = u.callback_query; await q.answer()
-    await safe_edit(q, "⚙️ <b>Days:</b> (e.g. 45) or /cancel"); return ADMIN_CUSTOM_DAYS
+    await safe_edit(q, "⚙️ <b>Days:</b> /cancel"); return ADMIN_CUSTOM_DAYS
 
 async def custom_days(u, c):
     t = u.message.text.strip()
-    if not t.isdigit() or int(t) <= 0: await safe_reply(u, "❌ Invalid! /cancel:"); return ADMIN_CUSTOM_DAYS
-    c.user_data["cd"] = int(t); await safe_reply(u, f"📅 <b>{t}D</b>\nDaily limit (<code>0</code>=∞):"); return ADMIN_CUSTOM_LIMIT
+    if not t.isdigit() or int(t) <= 0: await safe_reply(u, "❌ Invalid!"); return ADMIN_CUSTOM_DAYS
+    c.user_data["cd"] = int(t); await safe_reply(u, f"📅 <b>{t}D</b>\nLimit (<code>0</code>=∞):"); return ADMIN_CUSTOM_LIMIT
 
 async def custom_limit(u, c):
     t = u.message.text.strip()
-    if not t.isdigit(): await safe_reply(u, "❌ Invalid! /cancel:"); return ADMIN_CUSTOM_LIMIT
+    if not t.isdigit(): await safe_reply(u, "❌!"); return ADMIN_CUSTOM_LIMIT
     lim = int(t); unl = (lim == 0); days = c.user_data.get("cd"); uid = c.user_data.get("admin_uid")
     exp = upgrade_custom(int(uid), days, lim, unl)
-    await safe_reply(u, f"⚙️ <b>Custom Set!</b>\n🆔 <code>{uid}</code> | {days}D | <code>{exp}</code> | <code>{'∞' if unl else f'{lim}/day'}</code>", admin_kb())
+    await safe_reply(u, f"⚙️ <b>Set!</b> <code>{uid}</code>|{days}D|<code>{exp}</code>|<code>{'∞' if unl else f'{lim}/d'}</code>", admin_kb())
     c.user_data.pop("cd",None); c.user_data.pop("admin_uid",None); return ConversationHandler.END
 
-# Admin Promo Handlers
 async def admin_redeem_create_start(update, context):
     q = update.callback_query; await q.answer()
     if not is_admin(q.from_user.id): return ConversationHandler.END
-    await safe_edit(q, f"<code>{BANNER_MINI}</code>\n\n🎟️ <b>CREATE CODE</b>\n\nCode (3-20) or /cancel:"); return REDEEM_CREATE_CODE
+    await safe_edit(q, f"🎟️ <b>Code (3-20):</b> /cancel"); return REDEEM_CREATE_CODE
 
 async def admin_redeem_code_input(update, context):
     code = update.message.text.strip().upper()
-    if len(code) < 3 or len(code) > 20 or not code.isalnum(): await safe_reply(update, "❌ 3-20 alphanumeric! /cancel:"); return REDEEM_CREATE_CODE
-    if code in REDEEM_CODES: await safe_reply(update, f"❌ <code>{code}</code> exists! /cancel:"); return REDEEM_CREATE_CODE
-    context.user_data["nrc"] = code; await safe_reply(update, f"Code: <code>{code}</code>\n🎁 Free searches?"); return REDEEM_CREATE_SEARCHES
+    if len(code) < 3 or len(code) > 20 or not code.isalnum(): await safe_reply(update, "❌ Invalid!"); return REDEEM_CREATE_CODE
+    if code in REDEEM_CODES: await safe_reply(update, f"❌ <code>{code}</code> exists!"); return REDEEM_CREATE_CODE
+    context.user_data["nrc"] = code; await safe_reply(update, f"<code>{code}</code>\n🎁 Searches?"); return REDEEM_CREATE_SEARCHES
 
 async def admin_redeem_searches_input(update, context):
     t = update.message.text.strip()
-    if not t.isdigit() or int(t) <= 0: await safe_reply(update, "❌ Positive! /cancel:"); return REDEEM_CREATE_SEARCHES
+    if not t.isdigit() or int(t) <= 0: await safe_reply(update, "❌ Positive!"); return REDEEM_CREATE_SEARCHES
     context.user_data["nrs"] = int(t); await safe_reply(update, f"<b>+{t}</b>\n👥 Max users?"); return REDEEM_CREATE_LIMIT
 
 async def admin_redeem_limit_input(update, context):
     t = update.message.text.strip()
-    if not t.isdigit() or int(t) <= 0: await safe_reply(update, "❌ Positive! /cancel:"); return REDEEM_CREATE_LIMIT
+    if not t.isdigit() or int(t) <= 0: await safe_reply(update, "❌ Positive!"); return REDEEM_CREATE_LIMIT
     mu = int(t); code = context.user_data.get("nrc"); fs = context.user_data.get("nrs")
     create_redeem_code(code, fs, mu)
-    await safe_reply(update, f"<code>{BANNER_MINI}</code>\n\n🎉 <b>CREATED!</b>\n🔑 <code>{code}</code>\n🎁 <code>+{fs}</code>\n👥 <code>{mu}</code>\n\n<code>/redeem {code}</code>", admin_kb())
+    await safe_reply(update, f"🎉 <b>Created!</b> <code>{code}</code> | +{fs} | 👥{mu}\n<code>/redeem {code}</code>", admin_kb())
     context.user_data.pop("nrc",None); context.user_data.pop("nrs",None); return ConversationHandler.END
 
 async def admin_redeem_list(update, context):
     q = update.callback_query; await q.answer()
     if not is_admin(q.from_user.id): return
     codes = list_redeem_codes()
-    if not codes: await safe_edit(q, f"<code>{BANNER_MINI}</code>\n\n📋 No codes.", admin_kb()); return
+    if not codes: await safe_edit(q, "📋 No codes.", admin_kb()); return
     txt = f"<code>{BANNER_MINI}</code>\n\n🎟️ <b>CODES</b>\n\n"
     for code, info in codes.items():
         st = "🟢" if info.get("active",True) and info["used_count"] < info["max_uses"] else "🔴"
-        txt += f"{st} <code>{code}</code> | 🎁<code>+{info['free_searches']}</code> | 👥<code>{info['used_count']}/{info['max_uses']}</code>\n"
+        txt += f"{st} <code>{code}</code>|🎁<code>+{info['free_searches']}</code>|👥<code>{info['used_count']}/{info['max_uses']}</code>\n"
     await safe_edit(q, txt[:4000], admin_kb())
 
 async def admin_redeem_delete_start(update, context):
@@ -1102,7 +1201,7 @@ async def admin_redeem_delete_start(update, context):
     if not is_admin(q.from_user.id): return ConversationHandler.END
     codes = list_redeem_codes()
     if not codes: await safe_edit(q, "📋 No codes.", admin_kb()); return ConversationHandler.END
-    txt = f"<code>{BANNER_MINI}</code>\n\n🗑️ <b>DELETE CODE</b>\n\n" + "".join(f"• <code>{c}</code>\n" for c in codes) + "\nEnter code or /cancel:"
+    txt = f"🗑️ <b>DELETE</b>\n\n" + "".join(f"• <code>{c}</code>\n" for c in codes) + "\nEnter code or /cancel:"
     await safe_edit(q, txt); return REDEEM_DELETE_CODE
 
 async def admin_redeem_delete_input(update, context):
@@ -1120,8 +1219,8 @@ def main():
     print("🌐 Keep-alive on port 8080!")
 
     req = HTTPXRequest(connect_timeout=20, read_timeout=20, write_timeout=20)
-    get_updates_req = HTTPXRequest(connect_timeout=20, read_timeout=30, write_timeout=20)
-    app = ApplicationBuilder().token(BOT_TOKEN).request(req).get_updates_request(get_updates_req).build()
+    gur = HTTPXRequest(connect_timeout=20, read_timeout=30, write_timeout=20)
+    app = ApplicationBuilder().token(BOT_TOKEN).request(req).get_updates_request(gur).build()
 
     C = ConversationHandler; CQ = CallbackQueryHandler; MH = MessageHandler; CMD = CommandHandler
     F = filters.TEXT & ~filters.COMMAND; UF = [CMD("cancel", cancel), CMD("start", start)]
@@ -1155,21 +1254,21 @@ def main():
         C(entry_points=[CQ(ip_bs,pattern="^ip_batch$")],states={IP_BATCH:[MH(F,ip_bp)]},fallbacks=UF,per_message=False,allow_reentry=True),
         C(entry_points=[CQ(w_ss,pattern="^weather_single$")],states={WEATHER_SINGLE:[MH(F,w_sp)]},fallbacks=UF,per_message=False,allow_reentry=True),
         C(entry_points=[CQ(w_bs,pattern="^weather_batch$")],states={WEATHER_BATCH:[MH(F,w_bp)]},fallbacks=UF,per_message=False,allow_reentry=True),
-        # Admin
+        # Admin Conversations
         C(entry_points=[CQ(adm_add_s,pattern="^admin_add$")],states={ADMIN_ADD_ID:[MH(F,adm_add_id)],ADMIN_ADD_PLAN:[CQ(custom_s,pattern="^plan_custom$"),CQ(adm_add_plan,pattern="^plan_")],ADMIN_CUSTOM_DAYS:[MH(F,custom_days)],ADMIN_CUSTOM_LIMIT:[MH(F,custom_limit)]},fallbacks=UF,per_message=False,allow_reentry=True),
         C(entry_points=[CQ(adm_rem_s,pattern="^admin_remove$")],states={ADMIN_REM_ID:[MH(F,adm_rem_p)]},fallbacks=UF,per_message=False,allow_reentry=True),
         C(entry_points=[CQ(adm_sp_s,pattern="^admin_setplan$")],states={ADMIN_EXP_ID:[MH(F,adm_sp_id)],ADMIN_EXP_PLAN:[CQ(custom_s,pattern="^plan_custom$"),CQ(adm_sp_set,pattern="^plan_")],ADMIN_CUSTOM_DAYS:[MH(F,custom_days)],ADMIN_CUSTOM_LIMIT:[MH(F,custom_limit)]},fallbacks=UF,per_message=False,allow_reentry=True),
         C(entry_points=[CQ(bc_start,pattern="^admin_broadcast$")],states={ADMIN_BROADCAST_MSG:[MH(F,bc_msg)],ADMIN_BROADCAST_CONFIRM:[CQ(bc_confirm,pattern="^broadcast_(confirm|cancel)$")]},fallbacks=UF,per_message=False,allow_reentry=True),
         C(entry_points=[CQ(admin_redeem_create_start,pattern="^admin_redeem_create$")],states={REDEEM_CREATE_CODE:[MH(F,admin_redeem_code_input)],REDEEM_CREATE_SEARCHES:[MH(F,admin_redeem_searches_input)],REDEEM_CREATE_LIMIT:[MH(F,admin_redeem_limit_input)]},fallbacks=UF,per_message=False,allow_reentry=True),
         C(entry_points=[CQ(admin_redeem_delete_start,pattern="^admin_redeem_delete$")],states={REDEEM_DELETE_CODE:[MH(F,admin_redeem_delete_input)]},fallbacks=UF,per_message=False,allow_reentry=True),
+        # Logs by user conversation
+        C(entry_points=[CQ(logs_by_user_start,pattern="^logs_by_user$")],states={ADMIN_LOGS_USER_ID:[MH(F,logs_by_user_process)]},fallbacks=UF,per_message=False,allow_reentry=True),
     ]
 
     for cv in convs: app.add_handler(cv)
     
-    app.add_handler(CMD("start", start))
-    app.add_handler(CMD("cancel", cancel))
-    app.add_handler(CMD("admin", admin_panel))
-    app.add_handler(CMD("redeem", redeem_command))
+    app.add_handler(CMD("start", start)); app.add_handler(CMD("cancel", cancel))
+    app.add_handler(CMD("admin", admin_panel)); app.add_handler(CMD("redeem", redeem_command))
     app.add_error_handler(error_handler)
 
     callbacks = [
@@ -1182,16 +1281,18 @@ def main():
         ("help",help_menu),("buy",buy),("admin_list",adm_list),
         ("admin_stats",adm_stats),("admin_back",admin_back),("admin_free_monitor",adm_monitor),
         ("admin_redeem_list",admin_redeem_list),("admin_maintenance",admin_maintenance),
+        ("admin_logs",admin_logs_menu),("logs_recent",logs_recent),("logs_stats",logs_stats),
         ("main_menu",main_menu_cb),("verify_join",verify_join)
     ]
     for pattern, fn in callbacks:
         app.add_handler(CQ(fn, pattern=f"^{pattern}$"))
     
-    # Maintenance toggle handlers (regex pattern for all maint_toggle_ callbacks)
+    # Regex handlers
     app.add_handler(CQ(maint_toggle_handler, pattern=r"^maint_toggle_"))
+    app.add_handler(CQ(logs_by_feature, pattern=r"^logs_feat_"))
 
     print("╔══════════════════════════════════════════╗")
-    print("║   ☠️ ZERO TRACE + MAINTENANCE RUNNING ☠️  ║")
+    print("║  ☠️ ZERO TRACE + LOGS + MAINT RUNNING ☠️  ║")
     print("╚══════════════════════════════════════════╝")
     app.run_polling(drop_pending_updates=True, allowed_updates=["message","callback_query"])
 
