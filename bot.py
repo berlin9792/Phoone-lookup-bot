@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-🔍 Ultimate Intelligence Bot - ZERO TRACE (FULL PERSISTENT MAINTENANCE UPDATE)
+🔍 Ultimate Intelligence Bot - ZERO TRACE (PERSISTENT MAINTENANCE RESOLVED)
 Primary All-in-One Engine: alonepatel API
 Backup Engine: Old Individual API Endpoints
 Dual Force Join + Blood ASCII Banner + Animated Loader + Redeem Code + MongoDB Cloud
-+ PERSISTENT MAINTENANCE SYSTEM + PER-FEATURE TOGGLES + ACTIVITY LOGS + 24/7 Keep Alive
++ PERSISTENT DATABASE-BACKED MAINTENANCE + ACTIVITY LOGS + 24/7 Keep Alive
 """
 
 import json, os, threading, requests, logging, asyncio, re, time, html, secrets
@@ -166,13 +166,11 @@ def load_settings():
             logger.warning(f"Local Settings Load Error: {e}")
 
 def save_settings():
-    # Save Locally
     try:
         SETTINGS_FILE.write_text(json.dumps(SETTINGS_CACHE, indent=2))
     except Exception as e:
         logger.error(f"Local Settings Save Error: {e}")
 
-    # Sync to MongoDB in background
     def _save():
         if db is not None:
             try:
@@ -217,7 +215,7 @@ def get_maintenance_status():
 MAINTENANCE_MSG_FULL = f"🛠️ <b>BOT UNDER MAINTENANCE</b>\n\n⚠️ All services temporarily unavailable.\n\n⏳ Please try again later.\n📞 Contact: {OWNER_CONTACT}"
 
 def maintenance_msg_feature(feat_name):
-    return f"🛠️ <b>{feat_name.upper()} - UNDER MAINTENANCE</b>\n\n⚠️ <b>{html.escape(feat_name.title())}</b> is currently under maintenance.\nOther features may still be available.\n\n⏳ Try again later.\n📞 Contact: {OWNER_CONTACT}"
+    return f"🛠️ <b>{feat_name.upper()} - UNDER MAINTENANCE</b>\n\n⚠️ The <b>{html.escape(feat_name.title())}</b> feature is currently under maintenance.\nOther features may still be available.\n\n⏳ Try again later.\n📞 Contact: {OWNER_CONTACT}"
 
 # ================== 🔢 CONVERSATION STATES ==================
 PHONE_SINGLE, PHONE_BATCH       = 10, 11
@@ -773,7 +771,7 @@ async def execute_search(update, context, feat_name, action, param_key, search_v
     u = update.effective_user
     if not is_admin(u.id) and is_full_maintenance():
         await safe_reply(update, MAINTENANCE_MSG_FULL, back_kb()); return
-    if not is_admin(u.id) and is_feature_maintenance(feat_name):
+    if is_feature_maintenance(feat_name):
         await safe_reply(update, maintenance_msg_feature(feat_name), back_kb()); return
     ok, st, _, _, _ = check_feat_access(u.id, feat_name, feat_name.title())
     if not ok:
@@ -805,7 +803,7 @@ async def execute_batch(update, context, feat_name, action, param_key, items, ic
     
     if not is_admin(u.id) and is_full_maintenance():
         await safe_reply(update, MAINTENANCE_MSG_FULL, back_kb()); return
-    if not is_admin(u.id) and is_feature_maintenance(feat_name):
+    if is_feature_maintenance(feat_name):
         await safe_reply(update, maintenance_msg_feature(feat_name), back_kb()); return
 
     msg = await safe_reply(update, f"<code>{BANNER_MINI}</code>\n\n📦 <b>Batch:</b> <b>{total}</b>\n\n<code>[░░░░░░░░░░░░░░░░░░░░]</code> 0%")
@@ -828,7 +826,7 @@ async def execute_batch(update, context, feat_name, action, param_key, items, ic
 async def generic_mode_prompt(update, context, feat_name, display_title, icon):
     q = update.callback_query; await q.answer(); u = q.from_user
     if not is_admin(u.id) and is_full_maintenance(): await safe_edit(q, MAINTENANCE_MSG_FULL, back_kb()); return
-    if not is_admin(u.id) and is_feature_maintenance(feat_name): await safe_edit(q, maintenance_msg_feature(feat_name), back_kb()); return
+    if is_feature_maintenance(feat_name): await safe_edit(q, maintenance_msg_feature(feat_name), back_kb()); return
     if not is_admin(u.id) and not await check_joined(context, u.id): await safe_edit(q, "⚠️ Join!", force_join_kb()); return
     await safe_edit(q, f"<code>{BANNER_SEARCH}</code>\n\n{icon} <b>{display_title}</b> {icon}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nChoose:", search_sub_kb(u.id, feat_name))
 
@@ -852,7 +850,7 @@ def make_handler_pair(feat_name, action, param_key, icon, single_state, batch_st
     async def single_start(update, context):
         q = update.callback_query; await q.answer()
         if not is_admin(q.from_user.id) and is_full_maintenance(): await safe_edit(q, MAINTENANCE_MSG_FULL, back_kb()); return ConversationHandler.END
-        if not is_admin(q.from_user.id) and is_feature_maintenance(feat_name): await safe_edit(q, maintenance_msg_feature(feat_name), back_kb()); return ConversationHandler.END
+        if is_feature_maintenance(feat_name): await safe_edit(q, maintenance_msg_feature(feat_name), back_kb()); return ConversationHandler.END
         ok, st, _, _, _ = check_feat_access(q.from_user.id, feat_name, feat_name.title())
         if not ok: await safe_edit(q, f"🔒 {st}", buy_kb()); return ConversationHandler.END
         await safe_edit(q, f"<code>{BANNER_SEARCH}</code>\n\n{icon} <b>{prompt_single}</b>\n\nSend input or /cancel:")
@@ -861,7 +859,7 @@ def make_handler_pair(feat_name, action, param_key, icon, single_state, batch_st
     async def batch_start(update, context):
         q = update.callback_query; await q.answer()
         if not is_admin(q.from_user.id) and is_full_maintenance(): await safe_edit(q, MAINTENANCE_MSG_FULL, back_kb()); return ConversationHandler.END
-        if not is_admin(q.from_user.id) and is_feature_maintenance(feat_name): await safe_edit(q, maintenance_msg_feature(feat_name), back_kb()); return ConversationHandler.END
+        if is_feature_maintenance(feat_name): await safe_edit(q, maintenance_msg_feature(feat_name), back_kb()); return ConversationHandler.END
         ok, st, _, _, _ = check_feat_access(q.from_user.id, feat_name, feat_name.title())
         if not ok: await safe_edit(q, f"🔒 {st}", buy_kb()); return ConversationHandler.END
         await safe_edit(q, f"<code>{BANNER_SEARCH}</code>\n\n{icon} <b>{prompt_batch}</b>\n\nComma-separated (Max 15) or /cancel:")
@@ -1147,7 +1145,7 @@ async def adm_sp_set(u, c):
 
 async def adm_list(u, c):
     q = u.callback_query; await q.answer()
-    if not is_admin(q.from_user.id): return
+    if not is_admin(u.id): return
     users = load_users()
     if not users: await safe_edit(q, "📋 No users.", admin_kb()); return
     txt = f"<code>{BANNER_MINI}</code>\n\n📋 <b>USERS ({len(users)})</b>\n\n"
@@ -1163,7 +1161,7 @@ async def adm_list(u, c):
 
 async def adm_stats(u, c):
     q = u.callback_query; await q.answer()
-    if not is_admin(q.from_user.id): return
+    if not is_admin(u.id): return
     users = load_users(); ts = sum(v.get("total_searches",0) for v in users.values())
     act = sum(1 for u2, v in users.items() if v.get("is_premium") and int(u2) not in ADMIN_IDS)
     txt = f"<code>{BANNER_MINI}</code>\n\n📊 <b>STATS</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n👥 <code>{len(users)}</code> | 🔍 <code>{ts}</code> | 💎 <code>{act}</code> | 🎟️ <code>{len(list_redeem_codes())}</code>\n📅 <code>{datetime.now(IST).strftime('%d-%m-%Y %H:%M')}</code>"
@@ -1171,7 +1169,7 @@ async def adm_stats(u, c):
 
 async def adm_monitor(u, c):
     q = u.callback_query; await q.answer()
-    if not is_admin(q.from_user.id): return
+    if not is_admin(u.id): return
     users = load_users(); free = [v for u2, v in users.items() if not v.get("is_premium") and int(u2) not in ADMIN_IDS]
     await safe_edit(q, f"<code>{BANNER_MINI}</code>\n\n🆓 <b>FREE MONITOR</b>\n👥 <code>{len(free)}</code>", admin_kb())
 
@@ -1285,7 +1283,7 @@ def main():
     C = ConversationHandler; CQ = CallbackQueryHandler; MH = MessageHandler; CMD = CommandHandler
     F = filters.TEXT & ~filters.COMMAND; UF = [CMD("cancel", cancel), CMD("start", start)]
 
-    # Persistent settings load at startup
+    # Load persistent settings at startup (critical fix)
     load_settings()
 
     convs = [
