@@ -85,7 +85,7 @@ FEATURE_EXAMPLES = {
     "aadhaar":  "🪪 <b>Example:</b> <code>123456789012</code> (12 digits)",
     "vehicle":  "🚗 <b>Example:</b> <code>DL8CAF5030</code> or <code>MH12AB1234</code>",
     "ifsc":     "🏦 <b>Example:</b> <code>SBIN0001234</code> (11 chars)",
-    "tg":       "👤 <b>Example:</b> <code>5057489358</code> (Numeric TG ID)",
+    "tg":       "👤 <b>Example:</b> <code>7142426722</code> (Numeric TG ID)",
     "insta":    "📸 <b>Example:</b> <code>cristiano</code> or <code>@leomessi</code>",
     "imei":     "📱 <b>Example:</b> <code>354751093234567</code> (15 digits)",
     "pin":      "📮 <b>Example:</b> <code>110001</code> (6 digits)",
