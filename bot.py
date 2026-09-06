@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
-🔍 Ultimate Intelligence Bot - ZERO TRACE (FULL MERGED ENGINE - LOGS UPDATE)
-+ Activity Logs System - Track who searched what
+🔍 Ultimate Intelligence Bot - ZERO TRACE (FULL PERSISTENT MAINTENANCE UPDATE)
+Primary All-in-One Engine: alonepatel API
+Backup Engine: Old Individual API Endpoints
+Dual Force Join + Blood ASCII Banner + Animated Loader + Redeem Code + MongoDB Cloud
++ PERSISTENT MAINTENANCE SYSTEM + PER-FEATURE TOGGLES + ACTIVITY LOGS + 24/7 Keep Alive
 """
 
 import json, os, threading, requests, logging, asyncio, re, time, html, secrets
@@ -67,12 +70,9 @@ PLANS = {
 
 # ================== 📋 ACTIVITY LOGS SYSTEM ==================
 IST = timezone(timedelta(hours=5, minutes=30))
-
-# Store last 200 search logs in memory (deque = auto-remove oldest)
 ACTIVITY_LOGS = deque(maxlen=200)
 
 def add_activity_log(user_id, username, first_name, feat_name, search_term, status="success"):
-    """Add a search activity log entry"""
     now = datetime.now(IST)
     log_entry = {
         "time": now.strftime("%d-%m-%Y %H:%M:%S"),
@@ -82,12 +82,10 @@ def add_activity_log(user_id, username, first_name, feat_name, search_term, stat
         "username": username or "N/A",
         "first_name": first_name or "Unknown",
         "feature": feat_name,
-        "search_term": str(search_term)[:50],  # Limit length for display
+        "search_term": str(search_term)[:50],
         "status": status
     }
     ACTIVITY_LOGS.append(log_entry)
-    
-    # Also save to MongoDB if available
     try:
         if users_col is not None:
             logs_col = db["activity_logs"]
@@ -99,31 +97,24 @@ def add_activity_log(user_id, username, first_name, feat_name, search_term, stat
         pass
 
 def get_recent_logs(count=20):
-    """Get last N log entries"""
     logs = list(ACTIVITY_LOGS)
     return logs[-count:] if len(logs) > count else logs
 
 def get_user_logs(user_id, count=10):
-    """Get logs for a specific user"""
     user_logs = [l for l in ACTIVITY_LOGS if l["user_id"] == user_id]
     return user_logs[-count:]
 
 def get_feature_logs(feat_name, count=15):
-    """Get logs for a specific feature"""
     feat_logs = [l for l in ACTIVITY_LOGS if l["feature"] == feat_name]
     return feat_logs[-count:]
 
 def format_logs_text(logs, title="📋 ACTIVITY LOGS"):
-    """Format log entries into readable HTML text"""
     if not logs:
         return f"<code>{BANNER_MINI}</code>\n\n{title}\n\n📭 <i>No activity logs yet.</i>"
-    
     txt = f"<code>{BANNER_MINI}</code>\n\n<b>{title}</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-    
-    for log in reversed(logs):  # newest first
+    for log in reversed(logs):
         status_icon = "✅" if log["status"] == "success" else "❌"
         uname = f"@{log['username']}" if log['username'] != "N/A" else log['first_name']
-        
         txt += (
             f"{status_icon} <b>{log['time_short']}</b> | "
             f"<code>{log['user_id']}</code> | "
@@ -131,46 +122,102 @@ def format_logs_text(logs, title="📋 ACTIVITY LOGS"):
             f"   🔍 <b>{log['feature'].upper()}</b> → "
             f"<code>{html.escape(log['search_term'])}</code>\n\n"
         )
-    
-    return txt[:4000]  # Telegram message limit
+    return txt[:4000]
 
-# ================== 🔧 MAINTENANCE SYSTEM ==================
-FULL_MAINTENANCE = False
-FEATURE_MAINTENANCE = {}
-
+# ================== 🔧 PERSISTENT MAINTENANCE SYSTEM ==================
 ALL_FEATURE_KEYS = [
     "phone", "email", "upi", "aadhaar", "vehicle", "ifsc",
     "tg", "insta", "imei", "pin", "country", "paytm", "ip", "weather"
 ]
 
-for _fk in ALL_FEATURE_KEYS:
-    FEATURE_MAINTENANCE[_fk] = False
+SETTINGS_FILE = Path("settings.json")
+SETTINGS_CACHE = {
+    "full_maintenance": False,
+    "feature_maintenance": {feat: False for feat in ALL_FEATURE_KEYS}
+}
 
-def is_full_maintenance(): return FULL_MAINTENANCE
-def is_feature_maintenance(feat_name): return FEATURE_MAINTENANCE.get(feat_name, False)
+def load_settings():
+    global SETTINGS_CACHE
+    # 1. MongoDB Load
+    if db is not None:
+        try:
+            settings_col = db["settings"]
+            doc = settings_col.find_one({"_id": "global_settings"})
+            if doc:
+                SETTINGS_CACHE["full_maintenance"] = doc.get("full_maintenance", False)
+                feat_maint = doc.get("feature_maintenance", {})
+                for feat in ALL_FEATURE_KEYS:
+                    SETTINGS_CACHE["feature_maintenance"][feat] = feat_maint.get(feat, False)
+                print("✅ Global Settings loaded from MongoDB!")
+                return
+        except Exception as e:
+            logger.warning(f"DB Settings Load Error: {e}")
+
+    # 2. Local Backup JSON Load
+    if SETTINGS_FILE.exists():
+        try:
+            data = json.loads(SETTINGS_FILE.read_text())
+            SETTINGS_CACHE["full_maintenance"] = data.get("full_maintenance", False)
+            feat_maint = data.get("feature_maintenance", {})
+            for feat in ALL_FEATURE_KEYS:
+                SETTINGS_CACHE["feature_maintenance"][feat] = feat_maint.get(feat, False)
+            print("💾 Global Settings loaded from Local JSON Backup!")
+        except Exception as e:
+            logger.warning(f"Local Settings Load Error: {e}")
+
+def save_settings():
+    # Save Locally
+    try:
+        SETTINGS_FILE.write_text(json.dumps(SETTINGS_CACHE, indent=2))
+    except Exception as e:
+        logger.error(f"Local Settings Save Error: {e}")
+
+    # Sync to MongoDB in background
+    def _save():
+        if db is not None:
+            try:
+                settings_col = db["settings"]
+                settings_col.update_one(
+                    {"_id": "global_settings"},
+                    {"$set": {
+                        "full_maintenance": SETTINGS_CACHE["full_maintenance"],
+                        "feature_maintenance": SETTINGS_CACHE["feature_maintenance"]
+                    }},
+                    upsert=True
+                )
+            except Exception as e:
+                logger.error(f"MongoDB Settings Sync Error: {e}")
+    threading.Thread(target=_save, daemon=True).start()
+
+def is_full_maintenance():
+    return SETTINGS_CACHE["full_maintenance"]
+
+def is_feature_maintenance(feat_name):
+    return SETTINGS_CACHE["feature_maintenance"].get(feat_name, False)
 
 def toggle_full_maintenance():
-    global FULL_MAINTENANCE
-    FULL_MAINTENANCE = not FULL_MAINTENANCE
-    return FULL_MAINTENANCE
+    SETTINGS_CACHE["full_maintenance"] = not SETTINGS_CACHE["full_maintenance"]
+    save_settings()
+    return SETTINGS_CACHE["full_maintenance"]
 
 def toggle_feature_maintenance(feat_name):
-    if feat_name in FEATURE_MAINTENANCE:
-        FEATURE_MAINTENANCE[feat_name] = not FEATURE_MAINTENANCE[feat_name]
-        return FEATURE_MAINTENANCE[feat_name]
+    if feat_name in SETTINGS_CACHE["feature_maintenance"]:
+        SETTINGS_CACHE["feature_maintenance"][feat_name] = not SETTINGS_CACHE["feature_maintenance"][feat_name]
+        save_settings()
+        return SETTINGS_CACHE["feature_maintenance"][feat_name]
     return False
 
 def get_maintenance_status():
-    lines = [f"🔧 <b>Full Bot Maintenance:</b> {'🔴 ON' if FULL_MAINTENANCE else '🟢 OFF'}", "", "<b>Per-Feature Maintenance:</b>"]
+    lines = [f"🔧 <b>Full Bot Maintenance:</b> {'🔴 ON' if SETTINGS_CACHE['full_maintenance'] else '🟢 OFF'}", "", "<b>Per-Feature Maintenance:</b>"]
     for feat in ALL_FEATURE_KEYS:
-        status = "🔴 ON" if FEATURE_MAINTENANCE.get(feat, False) else "🟢 OFF"
+        status = "🔴 ON" if SETTINGS_CACHE["feature_maintenance"].get(feat, False) else "🟢 OFF"
         lines.append(f"  • <b>{feat.title()}</b>: {status}")
     return "\n".join(lines)
 
 MAINTENANCE_MSG_FULL = f"🛠️ <b>BOT UNDER MAINTENANCE</b>\n\n⚠️ All services temporarily unavailable.\n\n⏳ Please try again later.\n📞 Contact: {OWNER_CONTACT}"
 
 def maintenance_msg_feature(feat_name):
-    return f"🛠️ <b>{feat_name.upper()} - UNDER MAINTENANCE</b>\n\n⚠️ <b>{feat_name.title()}</b> is currently under maintenance.\nOther features may still be available.\n\n⏳ Try again later.\n📞 Contact: {OWNER_CONTACT}"
+    return f"🛠️ <b>{feat_name.upper()} - UNDER MAINTENANCE</b>\n\n⚠️ <b>{html.escape(feat_name.title())}</b> is currently under maintenance.\nOther features may still be available.\n\n⏳ Try again later.\n📞 Contact: {OWNER_CONTACT}"
 
 # ================== 🔢 CONVERSATION STATES ==================
 PHONE_SINGLE, PHONE_BATCH       = 10, 11
@@ -649,11 +696,11 @@ def logs_kb():
     ])
 
 def maintenance_kb():
-    full_status = "🔴 ON" if FULL_MAINTENANCE else "🟢 OFF"
+    full_status = "🔴 ON" if is_full_maintenance() else "🟢 OFF"
     buttons = [[InlineKeyboardButton(f"🔧 Full Bot: {full_status}", callback_data="maint_toggle_full")]]
     feat_buttons = []
     for feat in ALL_FEATURE_KEYS:
-        st = "🔴" if FEATURE_MAINTENANCE.get(feat, False) else "🟢"
+        st = "🔴" if is_feature_maintenance(feat) else "🟢"
         feat_buttons.append(InlineKeyboardButton(f"{st} {feat.title()}", callback_data=f"maint_toggle_{feat}"))
     for i in range(0, len(feat_buttons), 2):
         buttons.append(feat_buttons[i:i+2])
@@ -721,9 +768,11 @@ async def cancel(update, context):
     context.user_data.clear()
     await safe_reply(update, "❌ Cancelled.", main_kb(update.effective_user.id)); return ConversationHandler.END
 
-# ================== 🛠️ SEARCH EXECUTION (WITH LOGGING) ==================
+# ================== 🛠️ SEARCH EXECUTION ==================
 async def execute_search(update, context, feat_name, action, param_key, search_value, icon, display_value):
     u = update.effective_user
+    if not is_admin(u.id) and is_full_maintenance():
+        await safe_reply(update, MAINTENANCE_MSG_FULL, back_kb()); return
     if not is_admin(u.id) and is_feature_maintenance(feat_name):
         await safe_reply(update, maintenance_msg_feature(feat_name), back_kb()); return
     ok, st, _, _, _ = check_feat_access(u.id, feat_name, feat_name.title())
@@ -740,14 +789,12 @@ async def execute_search(update, context, feat_name, action, param_key, search_v
 
     if res["ok"]:
         use_feature(u.id, feat_name)
-        # LOG THE ACTIVITY
         add_activity_log(u.id, u.username, u.first_name, feat_name, display_value, "success")
         text = format_universal_result(display_value, res["data"], icon)
         final = f"⚡ <b>Report!</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n{text}"
         if msg: await safe_edit(msg, final, main_kb(u.id))
         else: await safe_reply(update, final, main_kb(u.id))
     else:
-        # LOG FAILED ATTEMPT TOO
         add_activity_log(u.id, u.username, u.first_name, feat_name, display_value, "failed")
         err = f"<code>{BANNER_MINI}</code>\n\n🔴 <b>Failed!</b>\n\n❌ <code>{html.escape(str(display_value))}</code>\n📛 {html.escape(str(res['error']))}"
         if msg: await safe_edit(msg, err, back_kb())
@@ -755,6 +802,12 @@ async def execute_search(update, context, feat_name, action, param_key, search_v
 
 async def execute_batch(update, context, feat_name, action, param_key, items, icon):
     u = update.effective_user; total = len(items)
+    
+    if not is_admin(u.id) and is_full_maintenance():
+        await safe_reply(update, MAINTENANCE_MSG_FULL, back_kb()); return
+    if not is_admin(u.id) and is_feature_maintenance(feat_name):
+        await safe_reply(update, maintenance_msg_feature(feat_name), back_kb()); return
+
     msg = await safe_reply(update, f"<code>{BANNER_MINI}</code>\n\n📦 <b>Batch:</b> <b>{total}</b>\n\n<code>[░░░░░░░░░░░░░░░░░░░░]</code> 0%")
     for idx, item in enumerate(items, 1):
         pct = int((idx / total) * 100); filled = int(pct / 5); bar = "█" * filled + "░" * (20 - filled)
@@ -895,8 +948,8 @@ async def redeem_info(update, context):
 async def admin_panel(update, context):
     if not is_admin(update.effective_user.id): await safe_reply(update, "❌ Admin only!"); return ConversationHandler.END
     users = load_users(); t = len(users); p = sum(1 for v in users.values() if v.get("is_premium"))
-    maint_status = "🔴 ON" if FULL_MAINTENANCE else "🟢 OFF"
-    feat_maint = sum(1 for f in ALL_FEATURE_KEYS if FEATURE_MAINTENANCE.get(f, False))
+    maint_status = "🔴 ON" if is_full_maintenance() else "🟢 OFF"
+    feat_maint = sum(1 for f in ALL_FEATURE_KEYS if is_feature_maintenance(f))
     txt = f"<code>{BANNER_MINI}</code>\n\n🛠️ <b>ADMIN</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n🛡️ <code>{len(ADMIN_IDS)}</code> | 👥 <code>{t}</code> | 💎 <code>{p}</code> | 🆓 <code>{t-p}</code>\n🎟️ <code>{len(list_redeem_codes())}</code> | 📋 Logs: <code>{len(ACTIVITY_LOGS)}</code>\n🔧 Full: <b>{maint_status}</b> | 🛠️ Features: <code>{feat_maint}</code>"
     if update.callback_query: await safe_edit(update.callback_query, txt, admin_kb())
     else: await safe_reply(update, txt, admin_kb())
@@ -1026,30 +1079,36 @@ async def logs_stats(update, context):
 async def admin_maintenance(update, context):
     q = update.callback_query; await q.answer()
     if not is_admin(q.from_user.id): return
-    txt = f"<code>{BANNER_MINI}</code>\n\n🔧 <b>MAINTENANCE</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n{get_maintenance_status()}\n\n👇 <b>Toggle:</b>"
+    txt = f"<code>{BANNER_MINI}</code>\n\n🔧 <b>MAINTENANCE CONTROL</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n{get_maintenance_status()}\n\n👇 <b>Toggle any option:</b>"
     await safe_edit(q, txt, maintenance_kb())
 
 async def maint_toggle_handler(update, context):
     q = update.callback_query; await q.answer()
     if not is_admin(q.from_user.id): return
     data = q.data
-    if data == "maint_toggle_full": toggle_full_maintenance()
+    
+    if data == "maint_toggle_full":
+        new_state = toggle_full_maintenance()
+        logger.info(f"Full Maintenance toggled to: {new_state} by admin {q.from_user.id}")
     elif data.startswith("maint_toggle_"):
         feat = data.replace("maint_toggle_", "")
-        if feat in ALL_FEATURE_KEYS: toggle_feature_maintenance(feat)
-    txt = f"<code>{BANNER_MINI}</code>\n\n🔧 <b>MAINTENANCE</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n{get_maintenance_status()}\n\n👇 <b>Toggle:</b>"
+        if feat in ALL_FEATURE_KEYS:
+            new_state = toggle_feature_maintenance(feat)
+            logger.info(f"Feature '{feat}' Maintenance toggled to: {new_state} by admin {q.from_user.id}")
+    
+    # Refresh the maintenance panel
+    txt = f"<code>{BANNER_MINI}</code>\n\n🔧 <b>MAINTENANCE CONTROL</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n{get_maintenance_status()}\n\n👇 <b>Toggle any option:</b>"
     await safe_edit(q, txt, maintenance_kb())
 
-# ================== ADMIN PLAN + PROMO HANDLERS ==================
-# (Same as your existing code - keeping compact)
+# ================== ADMIN PLAN HANDLERS ==================
 async def adm_add_s(u, c):
     q = u.callback_query; await q.answer()
     if not is_admin(q.from_user.id): return ConversationHandler.END
-    await safe_edit(q, "➕ <b>User ID:</b> /cancel"); return ADMIN_ADD_ID
+    await safe_edit(q, "➕ <b>Enter User ID:</b> (or /cancel)"); return ADMIN_ADD_ID
 
 async def adm_add_id(u, c):
     uid = u.message.text.strip()
-    if not uid.isdigit(): await safe_reply(u, "❌ Invalid!"); return ADMIN_ADD_ID
+    if not uid.isdigit(): await safe_reply(u, "❌ Invalid! /cancel:"); return ADMIN_ADD_ID
     c.user_data["admin_uid"] = uid; await safe_reply(u, f"User: <code>{uid}</code>\nPlan:", plan_kb("plan")); return ADMIN_ADD_PLAN
 
 async def adm_add_plan(u, c):
@@ -1058,25 +1117,25 @@ async def adm_add_plan(u, c):
     pm = {"plan_7days":"7days","plan_30days":"30days","plan_6months":"6months","plan_12months":"12months"}
     pk = pm.get(q.data, "7days"); uid = c.user_data.get("admin_uid"); plan = PLANS.get(pk)
     exp = upgrade(int(uid), pk); dl = "∞" if plan["unlimited"] else f"{plan['daily_limit']}/day"
-    await safe_edit(q, f"✅ <b>Done!</b>\n🆔 <code>{uid}</code>\n📦 <b>{plan['name']}</b>\n📅 <code>{exp}</code>\n⚡ <code>{dl}</code>", admin_kb()); return ConversationHandler.END
+    await safe_edit(q, f"✅ <b>Activated!</b>\n🆔 <code>{uid}</code>\n📦 <b>{plan['name']}</b>\n📅 <code>{exp}</code>\n⚡ <code>{dl}</code>", admin_kb()); return ConversationHandler.END
 
 async def adm_rem_s(u, c):
     q = u.callback_query; await q.answer()
     if not is_admin(q.from_user.id): return ConversationHandler.END
-    await safe_edit(q, "❌ <b>User ID to remove:</b> /cancel"); return ADMIN_REM_ID
+    await safe_edit(q, "❌ <b>Enter User ID to remove:</b> (or /cancel)"); return ADMIN_REM_ID
 
 async def adm_rem_p(u, c):
-    delete_user(u.message.text.strip())
-    await safe_reply(u, f"✅ Removed!", admin_kb()); return ConversationHandler.END
+    uid = u.message.text.strip(); delete_user(uid)
+    await safe_reply(u, f"✅ <code>{uid}</code> removed!", admin_kb()); return ConversationHandler.END
 
 async def adm_sp_s(u, c):
     q = u.callback_query; await q.answer()
     if not is_admin(q.from_user.id): return ConversationHandler.END
-    await safe_edit(q, "📅 <b>User ID:</b> /cancel"); return ADMIN_EXP_ID
+    await safe_edit(q, "📅 <b>Enter User ID:</b> (or /cancel)"); return ADMIN_EXP_ID
 
 async def adm_sp_id(u, c):
-    c.user_data["admin_uid"] = u.message.text.strip()
-    await safe_reply(u, f"Plan:", plan_kb("plan")); return ADMIN_EXP_PLAN
+    uid = u.message.text.strip(); c.user_data["admin_uid"] = uid
+    await safe_reply(u, f"User: <code>{uid}</code>\nPlan:", plan_kb("plan")); return ADMIN_EXP_PLAN
 
 async def adm_sp_set(u, c):
     q = u.callback_query; await q.answer()
@@ -1092,11 +1151,11 @@ async def adm_list(u, c):
     users = load_users()
     if not users: await safe_edit(q, "📋 No users.", admin_kb()); return
     txt = f"<code>{BANNER_MINI}</code>\n\n📋 <b>USERS ({len(users)})</b>\n\n"
-    for uid, info in list(users.items())[-25:]:
+    for uid, info in list(users.items())[-30:]:
         ts = info.get("total_searches",0)
         if int(uid) in ADMIN_IDS: st = "🛡️"
         elif info.get("is_premium") and info.get("expiry"):
-            try: ed = date.fromisoformat(info["expiry"]); st = f"💎{(ed-date.today()).days}d" if date.today() <= ed else "🔴"
+            try: ed = date.fromisoformat(info["expiry"]); st = f"💎{(ed-date.today()).days}d" if date.today() <= ed else "🔴Exp"
             except Exception: st = "⚪"
         else: st = "🆓"
         txt += f"<code>{uid}</code>|{st}|🔍<code>{ts}</code>\n"
@@ -1107,22 +1166,23 @@ async def adm_stats(u, c):
     if not is_admin(q.from_user.id): return
     users = load_users(); ts = sum(v.get("total_searches",0) for v in users.values())
     act = sum(1 for u2, v in users.items() if v.get("is_premium") and int(u2) not in ADMIN_IDS)
-    await safe_edit(q, f"<code>{BANNER_MINI}</code>\n\n📊 <b>STATS</b>\n\n👥<code>{len(users)}</code> | 🔍<code>{ts}</code> | 💎<code>{act}</code> | 🎟️<code>{len(list_redeem_codes())}</code> | 📋<code>{len(ACTIVITY_LOGS)}</code>\n📅 <code>{datetime.now(IST).strftime('%d-%m-%Y %H:%M')}</code>", admin_kb())
+    txt = f"<code>{BANNER_MINI}</code>\n\n📊 <b>STATS</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n👥 <code>{len(users)}</code> | 🔍 <code>{ts}</code> | 💎 <code>{act}</code> | 🎟️ <code>{len(list_redeem_codes())}</code>\n📅 <code>{datetime.now(IST).strftime('%d-%m-%Y %H:%M')}</code>"
+    await safe_edit(q, txt, admin_kb())
 
 async def adm_monitor(u, c):
     q = u.callback_query; await q.answer()
     if not is_admin(q.from_user.id): return
     users = load_users(); free = [v for u2, v in users.items() if not v.get("is_premium") and int(u2) not in ADMIN_IDS]
-    await safe_edit(q, f"<code>{BANNER_MINI}</code>\n\n🆓 <b>FREE:</b> <code>{len(free)}</code>", admin_kb())
+    await safe_edit(q, f"<code>{BANNER_MINI}</code>\n\n🆓 <b>FREE MONITOR</b>\n👥 <code>{len(free)}</code>", admin_kb())
 
 async def bc_start(u, c):
     q = u.callback_query; await q.answer()
     if not is_admin(q.from_user.id): return ConversationHandler.END
-    await safe_edit(q, f"📢 <b>BROADCAST</b>\nSend msg or /cancel:"); return ADMIN_BROADCAST_MSG
+    await safe_edit(q, f"<code>{BANNER_MINI}</code>\n\n📢 <b>BROADCAST</b>\n\nSend message or /cancel:"); return ADMIN_BROADCAST_MSG
 
 async def bc_msg(u, c):
-    m = u.message.text.strip(); c.user_data["bc"] = m
-    await safe_reply(u, f"📢 <b>Preview:</b>\n\n{html.escape(m)}\n\n👥 <b>{len(load_users())}</b>\nConfirm?",
+    m = u.message.text.strip(); c.user_data["bc"] = m; users = load_users()
+    await safe_reply(u, f"📢 <b>Preview:</b>\n\n{html.escape(m)}\n\n👥 <b>{len(users)}</b> users\nConfirm?",
         InlineKeyboardMarkup([[InlineKeyboardButton("✅ Send", callback_data="broadcast_confirm")],[InlineKeyboardButton("❌ Cancel", callback_data="broadcast_cancel")]]))
     return ADMIN_BROADCAST_CONFIRM
 
@@ -1131,7 +1191,7 @@ async def bc_confirm(u, c):
     if q.data == "broadcast_cancel": await safe_edit(q, "❌ Cancelled.", admin_kb()); c.user_data.pop("bc",None); return ConversationHandler.END
     msg = c.user_data.get("bc",""); users = load_users(); total = len(users)
     bt = f"<code>{BANNER_MINI}</code>\n\n📢 <b>ANNOUNCEMENT</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━\n\n{html.escape(msg)}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━\n💬 {OWNER_CONTACT}"
-    sm = await safe_reply(u, f"🚀 <b>{total}</b>..."); s, f2, b, ct = 0, 0, 0, 0
+    sm = await safe_reply(u, f"🚀 <code>{total}</code>..."); s, f2, b, ct = 0, 0, 0, 0
     for uid in users:
         ct += 1
         try: await c.bot.send_message(chat_id=int(uid), text=bt, parse_mode="HTML"); s += 1
@@ -1151,7 +1211,7 @@ async def custom_s(u, c):
 async def custom_days(u, c):
     t = u.message.text.strip()
     if not t.isdigit() or int(t) <= 0: await safe_reply(u, "❌ Invalid!"); return ADMIN_CUSTOM_DAYS
-    c.user_data["cd"] = int(t); await safe_reply(u, f"📅 <b>{t}D</b>\nLimit (<code>0</code>=∞):"); return ADMIN_CUSTOM_LIMIT
+    c.user_data["cd"] = int(t); await safe_reply(u, f"📅 <b>{t}D</b>\nDaily limit (<code>0</code>=∞):"); return ADMIN_CUSTOM_LIMIT
 
 async def custom_limit(u, c):
     t = u.message.text.strip()
@@ -1225,6 +1285,9 @@ def main():
     C = ConversationHandler; CQ = CallbackQueryHandler; MH = MessageHandler; CMD = CommandHandler
     F = filters.TEXT & ~filters.COMMAND; UF = [CMD("cancel", cancel), CMD("start", start)]
 
+    # Persistent settings load at startup
+    load_settings()
+
     convs = [
         C(entry_points=[CQ(p_ss,pattern="^phone_single$")],states={PHONE_SINGLE:[MH(F,p_sp)]},fallbacks=UF,per_message=False,allow_reentry=True),
         C(entry_points=[CQ(p_bs,pattern="^phone_batch$")],states={PHONE_BATCH:[MH(F,p_bp)]},fallbacks=UF,per_message=False,allow_reentry=True),
@@ -1254,7 +1317,7 @@ def main():
         C(entry_points=[CQ(ip_bs,pattern="^ip_batch$")],states={IP_BATCH:[MH(F,ip_bp)]},fallbacks=UF,per_message=False,allow_reentry=True),
         C(entry_points=[CQ(w_ss,pattern="^weather_single$")],states={WEATHER_SINGLE:[MH(F,w_sp)]},fallbacks=UF,per_message=False,allow_reentry=True),
         C(entry_points=[CQ(w_bs,pattern="^weather_batch$")],states={WEATHER_BATCH:[MH(F,w_bp)]},fallbacks=UF,per_message=False,allow_reentry=True),
-        # Admin Conversations
+        # Admin conversations
         C(entry_points=[CQ(adm_add_s,pattern="^admin_add$")],states={ADMIN_ADD_ID:[MH(F,adm_add_id)],ADMIN_ADD_PLAN:[CQ(custom_s,pattern="^plan_custom$"),CQ(adm_add_plan,pattern="^plan_")],ADMIN_CUSTOM_DAYS:[MH(F,custom_days)],ADMIN_CUSTOM_LIMIT:[MH(F,custom_limit)]},fallbacks=UF,per_message=False,allow_reentry=True),
         C(entry_points=[CQ(adm_rem_s,pattern="^admin_remove$")],states={ADMIN_REM_ID:[MH(F,adm_rem_p)]},fallbacks=UF,per_message=False,allow_reentry=True),
         C(entry_points=[CQ(adm_sp_s,pattern="^admin_setplan$")],states={ADMIN_EXP_ID:[MH(F,adm_sp_id)],ADMIN_EXP_PLAN:[CQ(custom_s,pattern="^plan_custom$"),CQ(adm_sp_set,pattern="^plan_")],ADMIN_CUSTOM_DAYS:[MH(F,custom_days)],ADMIN_CUSTOM_LIMIT:[MH(F,custom_limit)]},fallbacks=UF,per_message=False,allow_reentry=True),
