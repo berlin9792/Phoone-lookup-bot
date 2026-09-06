@@ -93,7 +93,7 @@ def add_activity_log(user_id, username, first_name, feat_name, search_term, stat
         "feature": feat_name,
         "search_term": str(search_term)[:50],
         "status": status,
-        "timestamp": time.time()  # Timestamp directly added in memory log too
+        "timestamp": time.time()
     }
     ACTIVITY_LOGS.append(log_entry)
     try:
@@ -1240,9 +1240,9 @@ async def adm_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not users: 
         await safe_edit(q, "📋 No users in database.", admin_kb())
         return
-    txt = f"<code>{BANNER_MINI}</code>\n\n📋 <b>USERS LIST (Showing last 30)</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-    for uid, info in list(users.items())[-30:]:
-        ts = info.get("total_searches",0)
+    txt = f"<code>{BANNER_MINI}</code>\n\n📋 <b>ALL USERS LIST ({len(users)})</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    for uid, info in list(users.items()):
+        ts = info.get("total_searches", 0)
         if int(uid) in ADMIN_IDS: st = "🛡️ Admin"
         elif info.get("is_premium") and info.get("expiry"):
             try: 
@@ -1250,8 +1250,15 @@ async def adm_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 st = f"💎 {(ed-date.today()).days}d" if date.today() <= ed else "🔴 Expired"
             except Exception: st = "⚪ Error"
         else: st = "🆓 Free"
-        txt += f"👤 <code>{uid}</code> | {st} | 🔍 <code>{ts}</code>\n"
-    await safe_edit(q, txt[:4000], admin_kb())
+        
+        line = f"👤 <code>{uid}</code> | {st} | 🔍 <code>{ts}</code>\n"
+        
+        if len(txt) + len(line) > 4000:
+            txt += "\n⚠️ <i>List too long... Truncated for safety.</i>"
+            break
+        txt += line
+        
+    await safe_edit(q, txt, admin_kb())
 
 async def adm_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
@@ -1282,7 +1289,7 @@ async def adm_monitor(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"<code>{BANNER_MINI}</code>\n\n"
         f"🆓 <b>FREE USER MONITOR</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"👥 Active Trial/Free Users: <code>{len(free)}</code>\n"
+        f"👥 Active Trial/Free Users: <code>{len(free)}</code>\n\n"
         f"💡 Tip: Create promo codes to convert them into premium members!"
     )
     await safe_edit(q, txt, admin_kb())
@@ -1347,7 +1354,7 @@ async def admin_redeem_code_input(update, context):
 async def admin_redeem_searches_input(update, context):
     t = update.message.text.strip()
     if not t.isdigit() or int(t) <= 0: await safe_reply(update, "❌ Positive!"); return REDEEM_CREATE_SEARCHES
-    context.user_data["nrs"] = int(t); await safe_reply(update, f"<b>+{t}</b>\n👥 Max users?"); return REDEEM_CREATE_LIMIT
+    context.user_data["nrs"] = int(t); await safe_reply(update, f"<b>+{t}</b>\n🎁 Max users?"); return REDEEM_CREATE_LIMIT
 
 async def admin_redeem_limit_input(update, context):
     t = update.message.text.strip()
