@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-🔍 Ultimate Intelligence Bot - ZERO TRACE (FULL MERGED ENGINE)
+🔍 Ultimate Intelligence Bot - ZERO TRACE (FULL MERGED ENGINE - FIXED)
 Primary All-in-One Engine: alonepatel API
 Backup Engine: Old Individual API Endpoints
 Dual Force Join + Blood ASCII Banner + Animated Loader + Redeem Code + MongoDB Cloud + 24/7 Keep Alive
@@ -18,11 +18,14 @@ from telegram.ext import (
 )
 from telegram.request import HTTPXRequest
 
-logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO
+)
 logger = logging.getLogger(__name__)
 
 # ================== ⚙️ CONFIG ==================
-BOT_TOKEN     = "8642873626:AAFy5F79opcK_NMJ7NgGItd6sRrfbOc4TJU"
+BOT_TOKEN     = os.environ.get("BOT_TOKEN", "8642873626:AAFy5F79opcK_NMJ7NgGItd6sRrfbOc4TJU")
 ADMIN_IDS     = [5057489358, 1968142314]
 OWNER_CONTACT = "@theplayerror"
 
@@ -69,7 +72,7 @@ PLANS = {
     "12months": {"name": "12 Months", "days": 365, "price": 799, "daily_limit": 999999, "unlimited": True, "is_free": False},
 }
 
-# ================== 🔢 CONVERSATION STATES (EXPLICIT VALUES) ==================
+# ================== 🔢 CONVERSATION STATES ==================
 PHONE_SINGLE, PHONE_BATCH       = 10, 11
 EMAIL_SINGLE, EMAIL_BATCH       = 12, 13
 UPI_SINGLE, UPI_BATCH           = 14, 15
@@ -99,68 +102,69 @@ REDEEM_CREATE_LIMIT             = 72
 REDEEM_DELETE_CODE              = 73
 
 # ================== 🩸 BLOOD ASCII BANNERS ==================
-BANNER = """```
-╔══════════════════════════════╗    
-║                                   ║
-║   ☠️  Z E R O  T R A C E  ☠️      ║
-║          ~BY  LEGIT               ║
-╚══════════════════════════════╝
-```"""
+BANNER = (
+    "╔══════════════════════════════╗\n"
+    "║   ☠️  Z E R O  T R A C E  ☠️      ║\n"
+    "║          ~BY  LEGIT               ║\n"
+    "╚══════════════════════════════╝"
+)
 
-BANNER_MINI = """```
-┏━━━━━━━━━━━━━━━━━━━━━━┓
-┃  ☠️ ZERO TRACE ☠️        ┃
-┃     ~BY LEGIT            ┃
-┗━━━━━━━━━━━━━━━━━━━━━━┛
-```"""
+BANNER_MINI = (
+    "┏━━━━━━━━━━━━━━━━━━━━━━┓\n"
+    "┃  ☠️ ZERO TRACE ☠️        ┃\n"
+    "┃     ~BY LEGIT            ┃\n"
+    "┗━━━━━━━━━━━━━━━━━━━━━━┛"
+)
 
-BANNER_SEARCH = """```
-╔═══════════════════════╗
-║    ☠️ ZERO TRACE ☠️       ║
-║    ~BY LEGIT              ║
-╚═══════════════════════╝
-```"""
+BANNER_SEARCH = (
+    "╔═══════════════════════╗\n"
+    "║    ☠️ ZERO TRACE ☠️       ║\n"
+    "║    ~BY LEGIT              ║\n"
+    "╚═══════════════════════╝"
+)
 
 # ================== 🛡️ SAFE SENDERS ==================
 async def safe_reply(update: Update, text: str, reply_markup=None):
+    msg = update.effective_message
+    if not msg:
+        return None
     try:
-        if update.message:
-            return await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
-        elif update.callback_query and update.callback_query.message:
-            return await update.callback_query.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
-    except Exception:
-        clean = text.replace("*", "").replace("`", "").replace("_", "").replace("[", "").replace("]", "")
+        return await msg.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
+    except Exception as e:
+        logger.warning(f"safe_reply HTML failed: {e}. Retrying plain text...")
+        clean = re.sub(r"</?(?:b|i|code|pre|u|s)>", "", text)
+        clean = html.unescape(clean)
         try:
-            if update.message:
-                return await update.message.reply_text(clean, reply_markup=reply_markup)
-            elif update.callback_query and update.callback_query.message:
-                return await update.callback_query.message.reply_text(clean, reply_markup=reply_markup)
-        except Exception:
-            pass
+            return await msg.reply_text(clean[:4096], reply_markup=reply_markup)
+        except Exception as e2:
+            logger.error(f"safe_reply fallback error: {e2}")
+            return None
 
 async def safe_edit(target, text: str, reply_markup=None):
     try:
-        if hasattr(target, "edit_text"):
-            return await target.edit_text(text, reply_markup=reply_markup, parse_mode="Markdown")
-        elif hasattr(target, "edit_message_text"):
-            return await target.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
-    except Exception:
-        clean = text.replace("*", "").replace("`", "").replace("_", "").replace("[", "").replace("]", "")
+        if hasattr(target, "edit_message_text"):
+            return await target.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
+        elif hasattr(target, "edit_text"):
+            return await target.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
+    except Exception as e:
+        logger.warning(f"safe_edit HTML failed: {e}. Retrying plain text...")
+        clean = re.sub(r"</?(?:b|i|code|pre|u|s)>", "", text)
+        clean = html.unescape(clean)
         try:
-            if hasattr(target, "edit_text"):
-                return await target.edit_text(clean, reply_markup=reply_markup)
-            elif hasattr(target, "edit_message_text"):
-                return await target.edit_message_text(clean, reply_markup=reply_markup)
-        except Exception:
-            pass
+            if hasattr(target, "edit_message_text"):
+                return await target.edit_message_text(clean[:4096], reply_markup=reply_markup)
+            elif hasattr(target, "edit_text"):
+                return await target.edit_text(clean[:4096], reply_markup=reply_markup)
+        except Exception as e2:
+            logger.error(f"safe_edit fallback error: {e2}")
+            return None
 
-def is_admin(uid): return int(uid) in ADMIN_IDS
+def is_admin(uid): 
+    return int(uid) in ADMIN_IDS
 
 def safe_name(user):
     name = user.first_name or "User"
-    for ch in ["*", "_", "`", "[", "]", "(", ")"]:
-        name = name.replace(ch, "")
-    return name
+    return html.escape(name)
 
 # ================== 🎨 ANIMATED LOADING BAR ==================
 LOADING_STEPS = [
@@ -174,26 +178,25 @@ LOADING_STEPS = [
 
 def build_loading_text(icon, display, step_emoji, step_text, bar, percent):
     return (
-        f"{BANNER_SEARCH}\n"
-        f"{icon}  *Searching:* `{display}`\n"
+        f"<code>{BANNER_SEARCH}</code>\n\n"
+        f"{icon} <b>Searching:</b> <code>{html.escape(str(display))}</code>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"{step_emoji} *{step_text}*\n\n"
-        f"`[{bar}]` *{percent}%*\n\n"
-        f"⏳ _Please wait..._"
+        f"{step_emoji} <b>{step_text}</b>\n\n"
+        f"<code>[{bar}]</code> <b>{percent}%</b>\n\n"
+        f"⏳ <i>Please wait...</i>"
     )
 
 async def animated_search(msg, icon, display):
+    if not msg:
+        return
     percents = [10, 30, 55, 75, 95, 100]
     for i, (se, st, bar) in enumerate(LOADING_STEPS):
         pct = percents[i] if i < len(percents) else 100
         txt = build_loading_text(icon, display, se, st, bar, pct)
         try:
-            await msg.edit_text(txt, parse_mode="Markdown")
+            await msg.edit_text(txt, parse_mode="HTML")
         except Exception:
-            try:
-                await msg.edit_text(txt.replace("*", "").replace("`", "").replace("_", ""))
-            except Exception:
-                pass
+            pass
         if i < len(LOADING_STEPS) - 1:
             await asyncio.sleep(0.4)
 
@@ -211,12 +214,15 @@ def start_webserver():
 async def check_joined(context, uid):
     if is_admin(uid): return True
     try:
-        m1 = await asyncio.wait_for(context.bot.get_chat_member(FORCE_JOIN_CHANNEL_1_ID, uid), timeout=3.0)
-        if m1.status not in ["member", "administrator", "creator", "restricted"]: return False
-        m2 = await asyncio.wait_for(context.bot.get_chat_member(FORCE_JOIN_CHANNEL_2_ID, uid), timeout=3.0)
+        m1 = await context.bot.get_chat_member(FORCE_JOIN_CHANNEL_1_ID, uid)
+        if m1.status not in ["member", "administrator", "creator", "restricted"]:
+            return False
+        m2 = await context.bot.get_chat_member(FORCE_JOIN_CHANNEL_2_ID, uid)
         return m2.status in ["member", "administrator", "creator", "restricted"]
-    except Exception:
-        return False
+    except Exception as e:
+        logger.warning(f"Channel join check notice (User {uid}): {e}")
+        # Agar bot admin nahi hai channel me toh user ko block na kare
+        return True
 
 def force_join_kb():
     return InlineKeyboardMarkup([
@@ -368,10 +374,10 @@ def create_redeem_code(code, fs, mu):
 def use_redeem_code(code, user_id):
     code = code.upper().strip()
     user_id = str(user_id)
-    if code not in REDEEM_CODES: return False, "❌ Invalid code!"
+    if code not in REDEEM_CODES: return False, "❌ Invalid promo code!"
     rc = REDEEM_CODES[code]
-    if not rc.get("active", True): return False, "❌ Code is deactivated!"
-    if rc["used_count"] >= rc["max_uses"]: return False, "❌ Max user limit reached!"
+    if not rc.get("active", True): return False, "❌ Promo code is deactivated!"
+    if rc["used_count"] >= rc["max_uses"]: return False, "❌ Max user redemptions reached!"
     if user_id in rc.get("used_by", []): return False, "❌ You have already redeemed this code!"
     
     ud = get_user(user_id)
@@ -388,7 +394,7 @@ def use_redeem_code(code, user_id):
     rc["used_by"].append(user_id)
     REDEEM_CODES[code] = rc
     sync_redeem_background(code, rc)
-    return True, f"🎉 `{code}` redeemed successfully!\n🎁 *+{s} Extra Searches* on ALL tools!\n📊 Uses: `{rc['used_count']}/{rc['max_uses']}`"
+    return True, f"🎉 <code>{code}</code> redeemed successfully!\n🎁 <b>+{s} Extra Searches</b> added to ALL tools!\n📊 Uses: <code>{rc['used_count']}/{rc['max_uses']}</code>"
 
 def delete_redeem_code(code):
     code = code.upper().strip()
@@ -507,7 +513,7 @@ def use_feature(uid, feat_name):
     ud["total_searches"] = ud.get("total_searches", 0) + 1
     save_user(uid, ud)
 
-# ================== 📡 API ENGINE (PRIMARY + BACKUPS) ==================
+# ================== 📡 API ENGINE ==================
 def _safe_api(fn):
     try: return fn()
     except requests.exceptions.Timeout: return {"ok": False, "error": "⏱️ Timed out! API took too long."}
@@ -517,7 +523,6 @@ def _safe_api(fn):
         logger.error(f"API Error: {e}", exc_info=True)
         return {"ok": False, "error": f"❌ {e}"}
 
-# 🚀 Primary All-in-one Caller
 def primary_api_call(action: str, params: dict):
     def c():
         r = requests.get(
@@ -531,13 +536,12 @@ def primary_api_call(action: str, params: dict):
         try:
             data = r.json()
         except Exception:
-            return {"ok": False, "error": "Invalid response format."}
+            return {"ok": False, "error": "Invalid response format from API."}
         if isinstance(data, dict) and (data.get("status") in [False, "error", 400, 404] or data.get("success") is False):
             return {"ok": False, "error": str(data.get("message") or data.get("error") or "No records found.")}
         return {"ok": True, "data": data}
     return _safe_api(c)
 
-# 🔄 Backup Endpoints (Saved in script)
 def backup_search_worker_api(term):
     def c():
         r = requests.get(BACKUP_SEARCH_API_URL, params={"pin": BACKUP_PIN, "term": term}, headers=COMMON_HEADERS, timeout=20)
@@ -547,30 +551,6 @@ def backup_search_worker_api(term):
 def backup_phone_api(num):
     def c():
         r = requests.get(BACKUP_PHONE_API_URL, params={"key": BACKUP_PIN, "number": num}, headers=COMMON_HEADERS, timeout=20)
-        return {"ok": False, "error": f"HTTP {r.status_code}"} if r.status_code != 200 else {"ok": True, "data": r.json()}
-    return _safe_api(c)
-
-def backup_aadhaar_api(aid):
-    def c():
-        r = requests.get(BACKUP_AADHAAR_API_URL, params={"key": BACKUP_AADHAAR_API_KEY, "id": aid}, headers=COMMON_HEADERS, timeout=20)
-        return {"ok": False, "error": f"HTTP {r.status_code}"} if r.status_code != 200 else {"ok": True, "data": r.json()}
-    return _safe_api(c)
-
-def backup_vehicle_api(rc):
-    def c():
-        r = requests.get(BACKUP_VEHICLE_API_URL, params={"key": BACKUP_VEHICLE_API_KEY, "rc": rc}, headers=COMMON_HEADERS, timeout=20)
-        return {"ok": False, "error": f"HTTP {r.status_code}"} if r.status_code != 200 else {"ok": True, "data": r.json()}
-    return _safe_api(c)
-
-def backup_ifsc_api(code):
-    def c():
-        r = requests.get(BACKUP_IFSC_API_URL, params={"type": "ifsc", "search": code, "api_key": BACKUP_IFSC_API_KEY}, headers=COMMON_HEADERS, timeout=20)
-        return {"ok": False, "error": f"HTTP {r.status_code}"} if r.status_code != 200 else {"ok": True, "data": r.json()}
-    return _safe_api(c)
-
-def backup_vinfo_api(vn):
-    def c():
-        r = requests.get(BACKUP_VINFO_API_URL, params={"types": "vinfo", "key": BACKUP_VINFO_API_KEY, "spell": vn}, headers=COMMON_HEADERS, timeout=20)
         return {"ok": False, "error": f"HTTP {r.status_code}"} if r.status_code != 200 else {"ok": True, "data": r.json()}
     return _safe_api(c)
 
@@ -653,7 +633,7 @@ def clean_metadata(data):
 def format_universal_result(term, raw_data, icon="🔍"):
     cleaned = clean_metadata(raw_data)
     if not cleaned:
-        return f"{BANNER_MINI}\n{icon} *Result for* `{term}`\n\n_No records found in database._"
+        return f"<code>{BANNER_MINI}</code>\n\n{icon} <b>Result for:</b> <code>{html.escape(str(term))}</code>\n\n<i>No records found in database.</i>"
     
     records = []
     def extract(item):
@@ -675,12 +655,12 @@ def format_universal_result(term, raw_data, icon="🔍"):
             unique.append(r)
             
     if not unique:
-        return f"{BANNER_MINI}\n{icon} *Result for* `{term}`\n\n_No records found._"
+        return f"<code>{BANNER_MINI}</code>\n\n{icon} <b>Result for:</b> <code>{html.escape(str(term))}</code>\n\n<i>No records found.</i>"
         
-    out = [BANNER_MINI, f"{icon} *Search Result:* `{term}`", f"📊 *{len(unique)} record(s) found*", "━" * 28]
+    out = [f"<code>{BANNER_MINI}</code>", f"\n{icon} <b>Search Result:</b> <code>{html.escape(str(term))}</code>", f"📊 <b>{len(unique)} record(s) found</b>", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━"]
     for idx, rec in enumerate(unique, 1):
         if len(unique) > 1:
-            out.append(f"\n*━━ Record #{idx} ━━*")
+            out.append(f"\n<b>━━ Record #{idx} ━━</b>")
         for k, v in rec.items():
             if isinstance(v, (dict, list)) or should_skip_key(k) or should_skip_val(v): continue
             emoji = em(k)
@@ -696,7 +676,7 @@ def format_universal_result(term, raw_data, icon="🔍"):
             else:
                 val_str = str(v).strip()
                 vs = val_str if ("@" in val_str or kl in ["vpa", "upi", "email", "ifsc", "code", "userid", "ip"]) else val_str.title()
-            out.append(f"{emoji} *{label}*: `{vs}`")
+            out.append(f"{emoji} <b>{html.escape(label)}:</b> <code>{html.escape(vs)}</code>")
             
     return "\n".join(out)
 
@@ -762,12 +742,22 @@ def plan_kb(pf):
 # ================== 🚀 START / MENU ==================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    if not user:
+        return ConversationHandler.END
     get_user(user.id)
     u_name = safe_name(user)
     
     if not is_admin(user.id):
         if not await check_joined(context, user.id):
-            t = f"{BANNER}\n🔴 *Force Join Required*\n\nWelcome *{u_name}*!\n\n⚠️ You must join our dual official channels to use this bot:\n📢 {FORCE_JOIN_CHANNEL_1}\n📢 {FORCE_JOIN_CHANNEL_2}\n\nClick below to verify 👇"
+            t = (
+                f"<code>{BANNER}</code>\n\n"
+                f"🔴 <b>Force Join Required</b>\n\n"
+                f"Welcome <b>{u_name}</b>!\n\n"
+                f"⚠️ Join our dual channels to access:\n"
+                f"📢 {FORCE_JOIN_CHANNEL_1}\n"
+                f"📢 {FORCE_JOIN_CHANNEL_2}\n\n"
+                f"Click below to verify 👇"
+            )
             if update.callback_query:
                 await safe_edit(update.callback_query, t, force_join_kb())
             else:
@@ -775,7 +765,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return ConversationHandler.END
 
     if is_admin(user.id):
-        t = f"{BANNER}\n👋 Welcome Boss *{u_name}*! 🛡️ `ADMIN ACCESS`\n\nAll tools active with unlimited access (💎 ∞).\n\n👇 *Select an Intelligence tool:*"
+        t = (
+            f"<code>{BANNER}</code>\n\n"
+            f"👋 Welcome Boss <b>{u_name}</b>! 🛡️ <code>ADMIN ACCESS</code>\n\n"
+            f"All tools active with unlimited access (💎 ∞).\n\n"
+            f"👇 <b>Select an Intelligence tool:</b>"
+        )
     else:
         ud = get_user(user.id)
         plan = get_plan(ud)
@@ -791,18 +786,25 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     dl = (ed - date.today()).days
                     if dl >= 0:
                         if plan.get("unlimited"):
-                            status_lines.append(f"🟢 {feat.title()}: `💎 ∞ ({dl}d)`")
+                            status_lines.append(f"🟢 {feat.title()}: <code>💎 ∞ ({dl}d)</code>")
                         else:
                             dr = feat_daily_rem(user.id, feat)
-                            status_lines.append(f"🟢 {feat.title()}: `💎 {dr}/{plan.get('daily_limit',0)} ({dl}d)`")
+                            status_lines.append(f"🟢 {feat.title()}: <code>💎 {dr}/{plan.get('daily_limit',0)} ({dl}d)</code>")
                     else:
-                        status_lines.append(f"🔴 {feat.title()}: `Expired ({fl}/{FREE_LIMIT})`")
+                        status_lines.append(f"🔴 {feat.title()}: <code>Expired ({fl}/{FREE_LIMIT})</code>")
                 except Exception:
-                    status_lines.append(f"⚪ {feat.title()}: `Unknown`")
+                    status_lines.append(f"⚪ {feat.title()}: <code>Unknown</code>")
             else:
-                status_lines.append(f"🆓 {feat.title()}: `{fl}/{FREE_LIMIT} Free`")
+                status_lines.append(f"🆓 {feat.title()}: <code>{fl}/{FREE_LIMIT} Free</code>")
                 
-        t = f"{BANNER}\n👋 Hello *{u_name}*!\n\n" + "\n".join(status_lines) + f"\n\n💡 *1 Plan unlocks all 14+ tools!*\n🎟️ Redeem code: `/redeem CODE`\n\n👇 *Select an OSINT module:*"
+        t = (
+            f"<code>{BANNER}</code>\n\n"
+            f"👋 Hello <b>{u_name}</b>!\n\n"
+            + "\n".join(status_lines)
+            + f"\n\n💡 <b>1 Plan unlocks all 14+ tools!</b>\n"
+            f"🎟️ Redeem code: <code>/redeem CODE</code>\n\n"
+            f"👇 <b>Select an OSINT module:</b>"
+        )
         
     if update.callback_query:
         await safe_edit(update.callback_query, t, main_kb(user.id))
@@ -812,16 +814,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def verify_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
+    await q.answer("Verifying membership...")
     u = q.from_user
     if await check_joined(context, u.id):
-        await q.answer("🎉 Verification Successful!")
         await start(update, context)
     else:
-        await q.answer("❌ Please join both channels first!", show_alert=True)
-        await safe_edit(q, f"{BANNER_MINI}\n⚠️ *Join both channels to continue!*\n\n📢 {FORCE_JOIN_CHANNEL_1}\n📢 {FORCE_JOIN_CHANNEL_2}", force_join_kb())
+        await safe_edit(q, f"<code>{BANNER_MINI}</code>\n\n⚠️ <b>Join both channels to continue!</b>\n\n📢 {FORCE_JOIN_CHANNEL_1}\n📢 {FORCE_JOIN_CHANNEL_2}", force_join_kb())
 
 async def main_menu_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
+    if update.callback_query:
+        await update.callback_query.answer()
     await start(update, context)
     return ConversationHandler.END
 
@@ -835,12 +838,11 @@ async def execute_search(update, context, feat_name, action, param_key, search_v
     u = update.effective_user
     ok, st, _, _, _ = check_feat_access(u.id, feat_name, feat_name.title())
     if not ok:
-        await safe_reply(update, f"{BANNER_MINI}\n🔒 *Access Restricted!*\n{st}\n\n🎟️ `/redeem CODE`\n💎 Contact {OWNER_CONTACT} for Premium.", buy_kb())
+        await safe_reply(update, f"<code>{BANNER_MINI}</code>\n\n🔒 <b>Access Restricted!</b>\n{st}\n\n🎟️ <code>/redeem CODE</code>\n💎 Contact {OWNER_CONTACT} for Premium.", buy_kb())
         return
 
-    msg = await safe_reply(update, "⏳ _Initializing Engine..._")
+    msg = await safe_reply(update, "⏳ <i>Initializing Engine...</i>")
     
-    # API call in executor with live animated loading
     api_task = asyncio.get_event_loop().run_in_executor(
         None,
         lambda: primary_api_call(action, {param_key: search_value})
@@ -848,7 +850,6 @@ async def execute_search(update, context, feat_name, action, param_key, search_v
     anim_task = animated_search(msg, icon, display_value)
     res, _ = await asyncio.gather(api_task, anim_task)
     
-    # Check if primary worked, else try backup if applicable
     if not res["ok"] and feat_name == "email":
         res = await asyncio.get_event_loop().run_in_executor(None, lambda: backup_search_worker_api(search_value))
     elif not res["ok"] and feat_name == "phone":
@@ -857,25 +858,25 @@ async def execute_search(update, context, feat_name, action, param_key, search_v
     if res["ok"]:
         use_feature(u.id, feat_name)
         text = format_universal_result(display_value, res["data"], icon)
-        final_text = f"⚡ *Intelligence Report Generated!*\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n{text}"
+        final_text = f"⚡ <b>Intelligence Report Generated!</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n{text}"
         if msg: await safe_edit(msg, final_text, main_kb(u.id))
         else: await safe_reply(update, final_text, main_kb(u.id))
     else:
-        err = f"{BANNER_MINI}\n🔴 *Query Failed!*\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n❌ Term: `{display_value}`\n📛 Error: {res['error']}\n\n💡 _Please check the input and try again._"
+        err = f"<code>{BANNER_MINI}</code>\n\n🔴 <b>Query Failed!</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n❌ Term: <code>{html.escape(str(display_value))}</code>\n📛 Error: {html.escape(str(res['error']))}\n\n💡 <i>Please check the input and try again.</i>"
         if msg: await safe_edit(msg, err, back_kb())
         else: await safe_reply(update, err, back_kb())
 
 async def execute_batch(update, context, feat_name, action, param_key, items, icon):
     u = update.effective_user
     total = len(items)
-    msg = await safe_reply(update, f"{BANNER_MINI}\n📦 *Batch Processing Initiated*\n🚀 Items to process: *{total}*\n\n`[░░░░░░░░░░░░░░░░░░░░]` 0%")
+    msg = await safe_reply(update, f"<code>{BANNER_MINI}</code>\n\n📦 <b>Batch Processing Initiated</b>\n🚀 Items: <b>{total}</b>\n\n<code>[░░░░░░░░░░░░░░░░░░░░]</code> 0%")
     
     for idx, item in enumerate(items, 1):
         pct = int((idx / total) * 100)
         filled = int(pct / 5)
         bar = "█" * filled + "░" * (20 - filled)
         try:
-            await msg.edit_text(f"{BANNER_MINI}\n📦 *Processing Batch:*\n🔍 `{item}`\n📊 Progress: *{idx}/{total}*\n\n`[{bar}]` *{pct}%*", parse_mode="Markdown")
+            await msg.edit_text(f"<code>{BANNER_MINI}</code>\n\n📦 <b>Batch Processing:</b>\n🔍 <code>{html.escape(str(item))}</code>\n📊 Progress: <b>{idx}/{total}</b>\n\n<code>[{bar}]</code> <b>{pct}%</b>", parse_mode="HTML")
         except Exception:
             pass
             
@@ -884,11 +885,11 @@ async def execute_batch(update, context, feat_name, action, param_key, items, ic
             use_feature(u.id, feat_name)
             await safe_reply(update, format_universal_result(item, res["data"], icon))
         else:
-            await safe_reply(update, f"❌ `{item}`: {res['error']}")
+            await safe_reply(update, f"❌ <code>{html.escape(str(item))}</code>: {html.escape(str(res['error']))}")
         await asyncio.sleep(0.3)
         
     if msg:
-        await safe_edit(msg, f"{BANNER_MINI}\n⚡ *Batch Processing Finished!*\n✅ Processed: *{total}* items\n`[████████████████████]` *100%*", main_kb(u.id))
+        await safe_edit(msg, f"<code>{BANNER_MINI}</code>\n\n⚡ <b>Batch Processing Complete!</b>\n✅ Total: <b>{total}</b> items\n<code>[████████████████████]</code> <b>100%</b>", main_kb(u.id))
 
 # ================== 📱 MODE PROMPTERS ==================
 async def generic_mode_prompt(update, context, feat_name, display_title, icon):
@@ -898,7 +899,7 @@ async def generic_mode_prompt(update, context, feat_name, display_title, icon):
     if not is_admin(u.id) and not await check_joined(context, u.id):
         await safe_edit(q, "⚠️ Join required!", force_join_kb())
         return
-    await safe_edit(q, f"{BANNER_SEARCH}\n{icon} *{display_title} OSINT* {icon}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nChoose search type:", search_sub_kb(u.id, feat_name))
+    await safe_edit(q, f"<code>{BANNER_SEARCH}</code>\n\n{icon} <b>{display_title} OSINT</b> {icon}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nChoose search type:", search_sub_kb(u.id, feat_name))
 
 async def mode_phone(u, c): await generic_mode_prompt(u, c, "phone", "Phone Tracker", "📱")
 async def mode_email(u, c): await generic_mode_prompt(u, c, "email", "Email OSINT", "📧")
@@ -923,7 +924,7 @@ def make_handler_pair(feat_name, action, param_key, icon, single_state, batch_st
         if not ok:
             await safe_edit(q, f"🔒 {st}", buy_kb())
             return ConversationHandler.END
-        await safe_edit(q, f"{BANNER_SEARCH}\n{icon} *{prompt_single}*\n\nSend input or type /cancel:")
+        await safe_edit(q, f"<code>{BANNER_SEARCH}</code>\n\n{icon} <b>{prompt_single}</b>\n\nSend input or type /cancel:")
         return single_state
 
     async def batch_start(update, context):
@@ -932,7 +933,7 @@ def make_handler_pair(feat_name, action, param_key, icon, single_state, batch_st
         if not ok:
             await safe_edit(q, f"🔒 {st}", buy_kb())
             return ConversationHandler.END
-        await safe_edit(q, f"{BANNER_SEARCH}\n{icon} *{prompt_batch}*\n\nSend comma-separated list (Max 15) or /cancel:")
+        await safe_edit(q, f"<code>{BANNER_SEARCH}</code>\n\n{icon} <b>{prompt_batch}</b>\n\nSend comma-separated list (Max 15) or /cancel:")
         return batch_state
 
     async def single_process(update, context):
@@ -956,7 +957,6 @@ def make_handler_pair(feat_name, action, param_key, icon, single_state, batch_st
 
     return single_start, batch_start, single_process, batch_process
 
-# Validation Cleaners
 def clean_num(x):
     c = x.replace(" ", "").replace("-", "").replace("+", "")
     return c if c.isdigit() and 7 <= len(c) <= 15 else None
@@ -973,7 +973,6 @@ def clean_ifsc(x):
     c = x.upper().replace(" ", "")
     return c if len(c) == 11 else None
 
-# Generating All Features
 (p_ss, p_bs, p_sp, p_bp) = make_handler_pair("phone", "num", "number", "📱", PHONE_SINGLE, PHONE_BATCH, "Enter Phone Number (e.g. 9876543210):", "Enter Phone Numbers (comma-separated):", clean_num)
 (e_ss, e_bs, e_sp, e_bp) = make_handler_pair("email", "email", "email", "📧", EMAIL_SINGLE, EMAIL_BATCH, "Enter Email Address:", "Enter Emails (comma-separated):", lambda x: x.strip() if "@" in x else None)
 (u_ss, u_bs, u_sp, u_bp) = make_handler_pair("upi", "upiinfo", "upi", "💳", UPI_SINGLE, UPI_BATCH, "Enter UPI ID (e.g. name@okhdfcbank):", "Enter UPI IDs (comma-separated):", lambda x: x.strip() if "@" in x else None)
@@ -999,21 +998,20 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     rc = ud.get("redeemed_codes", [])
     
     txt = (
-        f"{BANNER_MINI}\n"
-        f"👤 *USER INTELLIGENCE PROFILE*\n"
+        f"<code>{BANNER_MINI}</code>\n\n"
+        f"👤 <b>USER INTELLIGENCE PROFILE</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"🆔 User ID: `{u.id}`\n"
-        f"👤 Name: *{safe_name(u)}*\n"
-        f"📦 Active Plan: *{plan['name']}*\n"
-        f"📅 Expiry: `{ud.get('expiry', 'Lifetime Free')}`\n"
-        f"🔍 Total Lookups Performed: `{ts}`\n"
-        f"🎟️ Codes Redeemed: `{len(rc)}`\n\n"
-        f"💎 *Search Breakdown:*\n"
-        f"📱 Phone: `{ud.get('phone_total',0)}` | 🪪 Aadhaar: `{ud.get('aadhaar_total',0)}`\n"
-        f"💳 UPI: `{ud.get('upi_total',0)}` | 📧 Email: `{ud.get('email_total',0)}`\n"
-        f"🚗 Vehicle: `{ud.get('vehicle_total',0)}` | 🏦 IFSC: `{ud.get('ifsc_total',0)}`\n"
-        f"👤 Telegram: `{ud.get('tg_total',0)}` | 📸 Insta: `{ud.get('insta_total',0)}`\n"
-        f"📱 IMEI: `{ud.get('imei_total',0)}` | 📮 Pincode: `{ud.get('pin_total',0)}`"
+        f"🆔 User ID: <code>{u.id}</code>\n"
+        f"👤 Name: <b>{safe_name(u)}</b>\n"
+        f"📦 Active Plan: <b>{plan['name']}</b>\n"
+        f"📅 Expiry: <code>{ud.get('expiry', 'Lifetime Free')}</code>\n"
+        f"🔍 Total Lookups: <code>{ts}</code>\n"
+        f"🎟️ Codes Redeemed: <code>{len(rc)}</code>\n\n"
+        f"💎 <b>Search Breakdown:</b>\n"
+        f"📱 Phone: <code>{ud.get('phone_total',0)}</code> | 🪪 Aadhaar: <code>{ud.get('aadhaar_total',0)}</code>\n"
+        f"💳 UPI: <code>{ud.get('upi_total',0)}</code> | 📧 Email: <code>{ud.get('email_total',0)}</code>\n"
+        f"🚗 Vehicle: <code>{ud.get('vehicle_total',0)}</code> | 🏦 IFSC: <code>{ud.get('ifsc_total',0)}</code>\n"
+        f"👤 Telegram: <code>{ud.get('tg_total',0)}</code> | 📸 Insta: <code>{ud.get('insta_total',0)}</code>"
     )
     await safe_edit(q, txt, back_kb())
 
@@ -1021,34 +1019,34 @@ async def status_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
     u = q.from_user
     if is_admin(u.id):
-        await safe_edit(q, f"{BANNER_MINI}\n🛡️ *System Status:* `ADMIN MASTER`\n\nAll tools unlocked with unlimited quota (💎 ∞).", back_kb())
+        await safe_edit(q, f"<code>{BANNER_MINI}</code>\n\n🛡️ <b>System Status:</b> <code>ADMIN MASTER</code>\n\nAll tools unlocked with unlimited quota (💎 ∞).", back_kb())
         return
         
     lines = []
     for feat in ALL_FEATURE_KEYS:
         ok, st, _, ip, _ = check_feat_access(u.id, feat, feat.title())
-        lines.append(f"• *{feat.title()}*: `{st}`")
+        lines.append(f"• <b>{feat.title()}</b>: <code>{st}</code>")
         
-    txt = f"{BANNER_MINI}\n📊 *YOUR USAGE & QUOTA STATUS*\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n" + "\n".join(lines) + f"\n\n💰 *Upgrade Quota:* {OWNER_CONTACT}\n🆔 Your ID: `{u.id}`"
+    txt = f"<code>{BANNER_MINI}</code>\n\n📊 <b>YOUR USAGE & QUOTA STATUS</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n" + "\n".join(lines) + f"\n\n💰 <b>Upgrade Quota:</b> {OWNER_CONTACT}\n🆔 Your ID: <code>{u.id}</code>"
     await safe_edit(q, txt, back_kb())
 
 async def help_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
     txt = (
-        f"{BANNER}\n"
-        f"❓ *ZERO TRACE BOT MANUAL*\n"
+        f"<code>{BANNER}</code>\n\n"
+        f"❓ <b>ZERO TRACE BOT MANUAL</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"🎯 *All-In-One Intelligence Suite:*\n"
-        f"• 📱 *Phone*: Track location & telecom carrier\n"
-        f"• 🪪 *Aadhaar*: Verify status & family records\n"
-        f"• 💳 *UPI*: Resolve account holder real name\n"
-        f"• 🚗 *Vehicle*: Complete VAHAN RC & owner details\n"
-        f"• 🏦 *IFSC*: Bank branch & swift codes\n"
-        f"• 👤 *Telegram / Insta*: Social media profiling\n"
-        f"• 📱 *IMEI / Pincode*: Device & location lookup\n\n"
-        f"💎 *Subscriptions:*\n"
+        f"🎯 <b>All-In-One Intelligence Suite:</b>\n"
+        f"• 📱 <b>Phone</b>: Location & carrier info\n"
+        f"• 🪪 <b>Aadhaar</b>: UIDAI Ration details\n"
+        f"• 💳 <b>UPI</b>: Resolve real holder name\n"
+        f"• 🚗 <b>Vehicle</b>: Complete VAHAN RC info\n"
+        f"• 🏦 <b>IFSC</b>: Bank branch details\n"
+        f"• 👤 <b>Telegram / Insta</b>: OSINT Profiler\n"
+        f"• 📱 <b>IMEI / Pincode</b>: Device & Geo info\n\n"
+        f"💎 <b>Subscriptions:</b>\n"
         f"🥉 7 Days: ₹50 | 🥈 30 Days: ₹130 | 💎 1 Year: ₹799\n\n"
-        f"🎟️ *Promo Codes:* Use `/redeem YOUR_CODE`"
+        f"🎟️ <b>Promo Codes:</b> Use <code>/redeem CODE</code>"
     )
     await safe_edit(q, txt, back_kb())
 
@@ -1056,32 +1054,33 @@ async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
     u = q.from_user
     txt = (
-        f"{BANNER}\n"
-        f"💎 *ZERO TRACE PREMIUM ACCESS*\n"
+        f"<code>{BANNER}</code>\n\n"
+        f"💎 <b>ZERO TRACE PREMIUM ACCESS</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"🥉 *7 Days Plan* - ₹50 (10 searches/day)\n"
-        f"🥈 *30 Days Plan* - ₹130 (20 searches/day)\n"
-        f"🥇 *6 Months Plan* - ₹300 (35 searches/day)\n"
-        f"💎 *12 Months Plan* - ₹799 (Unlimited ∞ searches)\n\n"
-        f"⚡ *Features:* Access to all 14+ Intelligence OSINT tools without restrictions.\n\n"
-        f"📲 *Contact Admin to Activate:* {OWNER_CONTACT}\n"
-        f"🆔 Your Telegram ID: `{u.id}`"
+        f"🥉 <b>7 Days Plan</b> - ₹50 (10 searches/day)\n"
+        f"🥈 <b>30 Days Plan</b> - ₹130 (20 searches/day)\n"
+        f"🥇 <b>6 Months Plan</b> - ₹300 (35 searches/day)\n"
+        f"💎 <b>12 Months Plan</b> - ₹799 (Unlimited ∞ searches)\n\n"
+        f"⚡ <b>Features:</b> Access to all 14+ Intelligence OSINT tools without restrictions.\n\n"
+        f"📲 <b>Contact Admin to Activate:</b> {OWNER_CONTACT}\n"
+        f"🆔 Your Telegram ID: <code>{u.id}</code>"
     )
     await safe_edit(q, txt, buy_kb())
 
 # ================== 🎟️ REDEEM COMMAND ==================
 async def redeem_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    if not user: return
     if not context.args:
-        await safe_reply(update, f"{BANNER_MINI}\n🎟️ *Usage:* `/redeem CODE`\nExample: `/redeem ZERO50`", back_kb())
+        await safe_reply(update, f"<code>{BANNER_MINI}</code>\n\n🎟️ <b>Usage:</b> <code>/redeem CODE</code>\nExample: <code>/redeem ZERO50</code>", back_kb())
         return
     code = context.args[0].upper().strip()
     ok, msg = use_redeem_code(code, user.id)
-    await safe_reply(update, f"{BANNER_MINI}\n{msg}", main_kb(user.id))
+    await safe_reply(update, f"<code>{BANNER_MINI}</code>\n\n{msg}", main_kb(user.id))
 
 async def redeem_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
-    await safe_edit(q, f"{BANNER_SEARCH}\n🎟️ *Redeem Promo Codes*\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nGet free extra lookups by redeeming codes released during promotions and giveaways.\n\n👉 *Command:* `/redeem CODE`\nExample: `/redeem LEGITBONUS`", back_kb())
+    await safe_edit(q, f"<code>{BANNER_SEARCH}</code>\n\n🎟️ <b>Redeem Promo Codes</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nGet free extra lookups by redeeming promo codes.\n\n👉 <b>Command:</b> <code>/redeem CODE</code>\nExample: <code>/redeem LEGITBONUS</code>", back_kb())
 
 # ================== 👑 ADMIN PANEL ==================
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1092,14 +1091,14 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     t = len(users)
     p = sum(1 for v in users.values() if v.get("is_premium"))
     txt = (
-        f"{BANNER_MINI}\n"
-        f"🛠️ *ADMIN MASTER DASHBOARD*\n"
+        f"<code>{BANNER_MINI}</code>\n\n"
+        f"🛠️ <b>ADMIN MASTER DASHBOARD</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"🛡️ Active Admins: `{len(ADMIN_IDS)}`\n"
-        f"👥 Total Users: `{t}`\n"
-        f"💎 Premium Subscribers: `{p}`\n"
-        f"🆓 Free Tier Users: `{t - p}`\n"
-        f"🎟️ Active Promos: `{len(list_redeem_codes())}`"
+        f"🛡️ Active Admins: <code>{len(ADMIN_IDS)}</code>\n"
+        f"👥 Total Users: <code>{t}</code>\n"
+        f"💎 Premium Subscribers: <code>{p}</code>\n"
+        f"🆓 Free Tier Users: <code>{t - p}</code>\n"
+        f"🎟️ Active Promos: <code>{len(list_redeem_codes())}</code>"
     )
     if update.callback_query: await safe_edit(update.callback_query, txt, admin_kb())
     else: await safe_reply(update, txt, admin_kb())
@@ -1110,7 +1109,7 @@ async def admin_back(u, c): await admin_panel(u, c)
 async def adm_add_s(u, c):
     q = u.callback_query; await q.answer()
     if not is_admin(q.from_user.id): return ConversationHandler.END
-    await safe_edit(q, "➕ *Enter User Telegram ID to add plan:* (or /cancel)")
+    await safe_edit(q, "➕ <b>Enter User Telegram ID to add plan:</b> (or /cancel)")
     return ADMIN_ADD_ID
 
 async def adm_add_id(u, c):
@@ -1119,7 +1118,7 @@ async def adm_add_id(u, c):
         await safe_reply(u, "❌ Invalid ID! Enter numbers only or /cancel:")
         return ADMIN_ADD_ID
     c.user_data["admin_uid"] = uid
-    await safe_reply(u, f"Selected User: `{uid}`\nChoose plan duration:", plan_kb("plan"))
+    await safe_reply(u, f"Selected User: <code>{uid}</code>\nChoose plan duration:", plan_kb("plan"))
     return ADMIN_ADD_PLAN
 
 async def adm_add_plan(u, c):
@@ -1131,31 +1130,31 @@ async def adm_add_plan(u, c):
     plan = PLANS.get(pk)
     exp = upgrade(int(uid), pk)
     dl = "∞" if plan["unlimited"] else f"{plan['daily_limit']}/day"
-    await safe_edit(q, f"✅ *Plan Activated!*\n🆔 User: `{uid}`\n📦 Plan: *{plan['name']}*\n📅 Expiry: `{exp}`\n⚡ Quota: `{dl}`", admin_kb())
+    await safe_edit(q, f"✅ <b>Plan Activated!</b>\n🆔 User: <code>{uid}</code>\n📦 Plan: <b>{plan['name']}</b>\n📅 Expiry: <code>{exp}</code>\n⚡ Quota: <code>{dl}</code>", admin_kb())
     return ConversationHandler.END
 
 async def adm_rem_s(u, c):
     q = u.callback_query; await q.answer()
     if not is_admin(q.from_user.id): return ConversationHandler.END
-    await safe_edit(q, "❌ *Enter User ID to delete database records:* (or /cancel)")
+    await safe_edit(q, "❌ <b>Enter User ID to delete database records:</b> (or /cancel)")
     return ADMIN_REM_ID
 
 async def adm_rem_p(u, c):
     uid = u.message.text.strip()
     delete_user(uid)
-    await safe_reply(u, f"✅ User records for `{uid}` wiped successfully!", admin_kb())
+    await safe_reply(u, f"✅ User records for <code>{uid}</code> wiped successfully!", admin_kb())
     return ConversationHandler.END
 
 async def adm_sp_s(u, c):
     q = u.callback_query; await q.answer()
     if not is_admin(q.from_user.id): return ConversationHandler.END
-    await safe_edit(q, "📅 *Enter User ID to modify plan:* (or /cancel)")
+    await safe_edit(q, "📅 <b>Enter User ID to modify plan:</b> (or /cancel)")
     return ADMIN_EXP_ID
 
 async def adm_sp_id(u, c):
     uid = u.message.text.strip()
     c.user_data["admin_uid"] = uid
-    await safe_reply(u, f"User: `{uid}`\nSelect new plan:", plan_kb("plan"))
+    await safe_reply(u, f"User: <code>{uid}</code>\nSelect new plan:", plan_kb("plan"))
     return ADMIN_EXP_PLAN
 
 async def adm_sp_set(u, c):
@@ -1166,7 +1165,7 @@ async def adm_sp_set(u, c):
     uid = c.user_data.get("admin_uid")
     plan = PLANS.get(pk)
     exp = upgrade(int(uid), pk)
-    await safe_edit(q, f"✅ *Subscription Updated!*\n🆔 User: `{uid}`\n📦 Plan: *{plan['name']}*\n📅 New Expiry: `{exp}`", admin_kb())
+    await safe_edit(q, f"✅ <b>Subscription Updated!</b>\n🆔 User: <code>{uid}</code>\n📦 Plan: <b>{plan['name']}</b>\n📅 New Expiry: <code>{exp}</code>", admin_kb())
     return ConversationHandler.END
 
 async def adm_list(u, c):
@@ -1175,7 +1174,7 @@ async def adm_list(u, c):
     users = load_users()
     if not users:
         await safe_edit(q, "📋 No users found.", admin_kb()); return
-    txt = f"{BANNER_MINI}\n📋 *REGISTERED USERS ({len(users)})*\n\n"
+    txt = f"<code>{BANNER_MINI}</code>\n\n📋 <b>REGISTERED USERS ({len(users)})</b>\n\n"
     for uid, info in list(users.items())[-30:]:
         plan = get_plan(info)
         ts = info.get("total_searches", 0)
@@ -1186,7 +1185,7 @@ async def adm_list(u, c):
                 st = f"💎 {(ed - date.today()).days}d" if date.today() <= ed else "🔴 Exp"
             except Exception: st = "⚪"
         else: st = "🆓 Free"
-        txt += f"`{uid}` | {st} | 🔍 `{ts}`\n"
+        txt += f"<code>{uid}</code> | {st} | 🔍 <code>{ts}</code>\n"
     await safe_edit(q, txt[:4000], admin_kb())
 
 async def adm_stats(u, c):
@@ -1196,14 +1195,14 @@ async def adm_stats(u, c):
     ts = sum(v.get("total_searches", 0) for v in users.values())
     act = sum(1 for u2, v in users.items() if v.get("is_premium") and int(u2) not in ADMIN_IDS)
     txt = (
-        f"{BANNER_MINI}\n"
-        f"📊 *SYSTEM OVERVIEW STATS*\n"
+        f"<code>{BANNER_MINI}</code>\n\n"
+        f"📊 <b>SYSTEM OVERVIEW STATS</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"👥 Total Registered: `{len(users)}`\n"
-        f"🔍 Total Queries Served: `{ts}`\n"
-        f"💎 Active Premium Users: `{act}`\n"
-        f"🎟️ Active Redeem Codes: `{len(list_redeem_codes())}`\n"
-        f"📅 Date (IST): `{datetime.now(timezone(timedelta(hours=5, minutes=30))).strftime('%d-%m-%Y %H:%M')}`"
+        f"👥 Total Registered: <code>{len(users)}</code>\n"
+        f"🔍 Total Queries Served: <code>{ts}</code>\n"
+        f"💎 Active Premium Users: <code>{act}</code>\n"
+        f"🎟️ Active Redeem Codes: <code>{len(list_redeem_codes())}</code>\n"
+        f"📅 Date (IST): <code>{datetime.now(timezone(timedelta(hours=5, minutes=30))).strftime('%d-%m-%Y %H:%M')}</code>"
     )
     await safe_edit(q, txt, admin_kb())
 
@@ -1212,12 +1211,12 @@ async def adm_monitor(u, c):
     if not is_admin(q.from_user.id): return
     users = load_users()
     free = [v for u2, v in users.items() if not v.get("is_premium") and int(u2) not in ADMIN_IDS]
-    await safe_edit(q, f"{BANNER_MINI}\n🆓 *FREE TIER MONITOR*\n\n👥 Free Users Total: `{len(free)}`", admin_kb())
+    await safe_edit(q, f"<code>{BANNER_MINI}</code>\n\n🆓 <b>FREE TIER MONITOR</b>\n\n👥 Free Users Total: <code>{len(free)}</code>", admin_kb())
 
 async def bc_start(u, c):
     q = u.callback_query; await q.answer()
     if not is_admin(q.from_user.id): return ConversationHandler.END
-    await safe_edit(q, f"{BANNER_MINI}\n📢 *GLOBAL BROADCAST*\n\nSend broadcast text message or /cancel:")
+    await safe_edit(q, f"<code>{BANNER_MINI}</code>\n\n📢 <b>GLOBAL BROADCAST</b>\n\nSend broadcast text message or /cancel:")
     return ADMIN_BROADCAST_MSG
 
 async def bc_msg(u, c):
@@ -1226,7 +1225,7 @@ async def bc_msg(u, c):
     users = load_users()
     await safe_reply(
         u,
-        f"📢 *Broadcast Preview:*\n\n{m}\n\n👥 Target audience: *{len(users)} users*\nConfirm broadcast?",
+        f"📢 <b>Broadcast Preview:</b>\n\n{html.escape(m)}\n\n👥 Target audience: <b>{len(users)} users</b>\nConfirm broadcast?",
         InlineKeyboardMarkup([
             [InlineKeyboardButton("✅ Send Broadcast", callback_data="broadcast_confirm")],
             [InlineKeyboardButton("❌ Cancel", callback_data="broadcast_cancel")]
@@ -1243,29 +1242,29 @@ async def bc_confirm(u, c):
     msg = c.user_data.get("bc", "")
     users = load_users()
     total = len(users)
-    bt = f"{BANNER_MINI}\n📢 *GLOBAL ANNOUNCEMENT*\n━━━━━━━━━━━━━━━━━━━━━━━━━\n\n{msg}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━\n💬 Contact: {OWNER_CONTACT}"
+    bt = f"<code>{BANNER_MINI}</code>\n\n📢 <b>GLOBAL ANNOUNCEMENT</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━\n\n{html.escape(msg)}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━\n💬 Contact: {OWNER_CONTACT}"
     
-    sm = await safe_reply(u, f"🚀 Broadcasting to *{total}* users...")
+    sm = await safe_reply(u, f"🚀 Broadcasting to <b>{total}</b> users...")
     s, f2, b, ct = 0, 0, 0, 0
     for uid in users:
         ct += 1
         try:
-            await c.bot.send_message(chat_id=int(uid), text=bt, parse_mode="Markdown")
+            await c.bot.send_message(chat_id=int(uid), text=bt, parse_mode="HTML")
             s += 1
         except Exception as e:
             if any(w in str(e).lower() for w in ["blocked", "forbidden", "not found"]): b += 1
             else: f2 += 1
         if ct % 15 == 0 or ct == total:
-            try: await sm.edit_text(f"🚀 Progress: `{ct}/{total}` | ✅ `{s}` | 🚫 `{b}` | ❌ `{f2}`")
+            try: await sm.edit_text(f"🚀 Progress: <code>{ct}/{total}</code> | ✅ <code>{s}</code> | 🚫 <code>{b}</code> | ❌ <code>{f2}</code>", parse_mode="HTML")
             except Exception: pass
             
-    await safe_reply(u, f"✅ *Broadcast Complete!*\n👥 Total: `{total}` | ✅ Success: `{s}` | 🚫 Blocked: `{b}` | ❌ Failed: `{f2}`", admin_kb())
+    await safe_reply(u, f"✅ <b>Broadcast Complete!</b>\n👥 Total: <code>{total}</code> | ✅ Success: <code>{s}</code> | 🚫 Blocked: <code>{b}</code> | ❌ Failed: <code>{f2}</code>", admin_kb())
     c.user_data.pop("bc", None)
     return ConversationHandler.END
 
 async def custom_s(u, c):
     q = u.callback_query; await q.answer()
-    await safe_edit(q, "⚙️ *Enter custom duration in DAYS:* (e.g. 45) or /cancel")
+    await safe_edit(q, "⚙️ <b>Enter custom duration in DAYS:</b> (e.g. 45) or /cancel")
     return ADMIN_CUSTOM_DAYS
 
 async def custom_days(u, c):
@@ -1274,7 +1273,7 @@ async def custom_days(u, c):
         await safe_reply(u, "❌ Invalid days! Enter a positive integer or /cancel:")
         return ADMIN_CUSTOM_DAYS
     c.user_data["cd"] = int(t)
-    await safe_reply(u, f"📅 Duration: *{t} Days*\nEnter daily search limit (Enter `0` for unlimited ∞):")
+    await safe_reply(u, f"📅 Duration: <b>{t} Days</b>\nEnter daily search limit (Enter <code>0</code> for unlimited ∞):")
     return ADMIN_CUSTOM_LIMIT
 
 async def custom_limit(u, c):
@@ -1287,7 +1286,7 @@ async def custom_limit(u, c):
     days = c.user_data.get("cd")
     uid = c.user_data.get("admin_uid")
     exp = upgrade_custom(int(uid), days, lim, unl)
-    await safe_reply(u, f"⚙️ *Custom Plan Set!*\n🆔 User: `{uid}`\n📅 Days: `{days}`\n📅 Expiry: `{exp}`\n⚡ Quota: `{'∞ Unlimited' if unl else f'{lim}/day'}`", admin_kb())
+    await safe_reply(u, f"⚙️ <b>Custom Plan Set!</b>\n🆔 User: <code>{uid}</code>\n📅 Days: <code>{days}</code>\n📅 Expiry: <code>{exp}</code>\n⚡ Quota: <code>{'∞ Unlimited' if unl else f'{lim}/day'}</code>", admin_kb())
     c.user_data.pop("cd", None)
     c.user_data.pop("admin_uid", None)
     return ConversationHandler.END
@@ -1296,7 +1295,7 @@ async def custom_limit(u, c):
 async def admin_redeem_create_start(update, context):
     q = update.callback_query; await q.answer()
     if not is_admin(q.from_user.id): return ConversationHandler.END
-    await safe_edit(q, f"{BANNER_MINI}\n🎟️ *CREATE PROMO CODE*\n\nEnter Code Name (3-20 chars) or /cancel:")
+    await safe_edit(q, f"<code>{BANNER_MINI}</code>\n\n🎟️ <b>CREATE PROMO CODE</b>\n\nEnter Code Name (3-20 chars) or /cancel:")
     return REDEEM_CREATE_CODE
 
 async def admin_redeem_code_input(update, context):
@@ -1305,10 +1304,10 @@ async def admin_redeem_code_input(update, context):
         await safe_reply(update, "❌ Invalid! 3-20 alphanumeric letters only. Try again or /cancel:")
         return REDEEM_CREATE_CODE
     if code in REDEEM_CODES:
-        await safe_reply(update, f"❌ Code `{code}` already exists! Try another or /cancel:")
+        await safe_reply(update, f"❌ Code <code>{code}</code> already exists! Try another or /cancel:")
         return REDEEM_CREATE_CODE
     context.user_data["nrc"] = code
-    await safe_reply(update, f"Code Name: `{code}`\n🎁 How many free searches per tool should it give?")
+    await safe_reply(update, f"Code Name: <code>{code}</code>\n🎁 How many free searches per tool should it give?")
     return REDEEM_CREATE_SEARCHES
 
 async def admin_redeem_searches_input(update, context):
@@ -1317,7 +1316,7 @@ async def admin_redeem_searches_input(update, context):
         await safe_reply(update, "❌ Positive number only! Try again:")
         return REDEEM_CREATE_SEARCHES
     context.user_data["nrs"] = int(t)
-    await safe_reply(update, f"Searches: *+{t}*\n👥 Maximum users who can redeem this code?")
+    await safe_reply(update, f"Searches: <b>+{t}</b>\n👥 Maximum users who can redeem this code?")
     return REDEEM_CREATE_LIMIT
 
 async def admin_redeem_limit_input(update, context):
@@ -1329,7 +1328,7 @@ async def admin_redeem_limit_input(update, context):
     code = context.user_data.get("nrc")
     fs = context.user_data.get("nrs")
     create_redeem_code(code, fs, mu)
-    await safe_reply(update, f"{BANNER_MINI}\n🎉 *PROMO CODE CREATED!*\n\n🔑 Code: `{code}`\n🎁 Extra Searches: `+{fs}`\n👥 Max Redemptions: `{mu}`\n\n📢 Users can claim via: `/redeem {code}`", admin_kb())
+    await safe_reply(update, f"<code>{BANNER_MINI}</code>\n\n🎉 <b>PROMO CODE CREATED!</b>\n\n🔑 Code: <code>{code}</code>\n🎁 Extra Searches: <code>+{fs}</code>\n👥 Max Redemptions: <code>{mu}</code>\n\n📢 Users can claim via: <code>/redeem {code}</code>", admin_kb())
     context.user_data.pop("nrc", None)
     context.user_data.pop("nrs", None)
     return ConversationHandler.END
@@ -1339,11 +1338,11 @@ async def admin_redeem_list(update, context):
     if not is_admin(q.from_user.id): return
     codes = list_redeem_codes()
     if not codes:
-        await safe_edit(q, f"{BANNER_MINI}\n📋 No promo codes active.", admin_kb()); return
-    txt = f"{BANNER_MINI}\n🎟️ *ACTIVE PROMO CODES*\n\n"
+        await safe_edit(q, f"<code>{BANNER_MINI}</code>\n\n📋 No promo codes active.", admin_kb()); return
+    txt = f"<code>{BANNER_MINI}</code>\n\n🎟️ <b>ACTIVE PROMO CODES</b>\n\n"
     for code, info in codes.items():
         st = "🟢" if info.get("active", True) and info["used_count"] < info["max_uses"] else "🔴"
-        txt += f"{st} `{code}` | 🎁 `+{info['free_searches']}` | 👥 `{info['used_count']}/{info['max_uses']}`\n"
+        txt += f"{st} <code>{code}</code> | 🎁 <code>+{info['free_searches']}</code> | 👥 <code>{info['used_count']}/{info['max_uses']}</code>\n"
     await safe_edit(q, txt[:4000], admin_kb())
 
 async def admin_redeem_delete_start(update, context):
@@ -1352,16 +1351,16 @@ async def admin_redeem_delete_start(update, context):
     codes = list_redeem_codes()
     if not codes:
         await safe_edit(q, "📋 No promo codes exist.", admin_kb()); return ConversationHandler.END
-    txt = f"{BANNER_MINI}\n🗑️ *DELETE PROMO CODE*\n\n" + "".join(f"• `{c}`\n" for c in codes) + "\nEnter code name to delete or /cancel:"
+    txt = f"<code>{BANNER_MINI}</code>\n\n🗑️ <b>DELETE PROMO CODE</b>\n\n" + "".join(f"• <code>{c}</code>\n" for c in codes) + "\nEnter code name to delete or /cancel:"
     await safe_edit(q, txt)
     return REDEEM_DELETE_CODE
 
 async def admin_redeem_delete_input(update, context):
     code = update.message.text.strip().upper()
     if delete_redeem_code(code):
-        await safe_reply(update, f"✅ Promo code `{code}` deleted successfully!", admin_kb())
+        await safe_reply(update, f"✅ Promo code <code>{code}</code> deleted successfully!", admin_kb())
     else:
-        await safe_reply(update, f"❌ Promo code `{code}` not found!", admin_kb())
+        await safe_reply(update, f"❌ Promo code <code>{code}</code> not found!", admin_kb())
     return ConversationHandler.END
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
@@ -1373,8 +1372,10 @@ def main():
     threading.Thread(target=start_webserver, daemon=True).start()
     print("🌐 Keep-alive server running on port 8080!")
 
-    req = HTTPXRequest(connect_timeout=30, read_timeout=30, write_timeout=30, pool_timeout=30)
-    app = ApplicationBuilder().token(BOT_TOKEN).request(req).get_updates_request(req).build()
+    # Separate request instances to avoid HTTPX transport deadlocks
+    req = HTTPXRequest(connect_timeout=20, read_timeout=20, write_timeout=20)
+    get_updates_req = HTTPXRequest(connect_timeout=20, read_timeout=30, write_timeout=20)
+    app = ApplicationBuilder().token(BOT_TOKEN).request(req).get_updates_request(get_updates_req).build()
     
     C = ConversationHandler
     CQ = CallbackQueryHandler
