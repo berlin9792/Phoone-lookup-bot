@@ -36,9 +36,9 @@ PRIMARY_API_URL = "https://api-src.alonepatel.shop/api"
 PRIMARY_API_KEY = "INDIAN_HACKER_BRO"
 
 # ── Dynamic Phone Search Engine Selector ──
-PHONE_ENGINE_ACTIVE = "cloudflare"
+PHONE_ENGINE_ACTIVE = "primary"  # Now defaulted to "primary" API
 
-# ── Active Phone OSINT API (Cloudflare) ──
+# ── Active Phone OSINT API (Cloudflare) - Used as Backup Now ──
 ACTIVE_PHONE_API_URL = "https://storage-deutschland-don-patterns.trycloudflare.com/num"
 ACTIVE_PHONE_API_KEY = "DADDY"
 
@@ -149,7 +149,7 @@ def cleanup_old_logs_loop():
         except Exception as e:
             logger.error(f"❌ Error in auto-logs cleanup loop: {e}")
         
-        time.sleep(1800)  # Har 30 minutes me run hoga cleanup check karne ke liye
+        time.sleep(1800)  # Runs every 30 minutes to check and cleanup
 
 def get_recent_logs(count=20):
     logs = list(ACTIVITY_LOGS)
@@ -441,7 +441,7 @@ def init_cache():
         try: REDEEM_CODES = json.loads(REDEEM_FILE.read_text())
         except Exception: REDEEM_CODES = {}
         
-    # Active Logs load karega (Sirf pichle 3 din ke logs hi memory me load honge startup par)
+    # Active Logs load (Only previous 3 days logs are memory loaded at startup)
     if db is not None:
         try:
             logs_col = db["activity_logs"]
@@ -620,7 +620,7 @@ def primary_api_call(action, params):
         return {"ok": True, "data": data}
     return _safe_api(c)
 
-# 🚀 Active Phone API Call
+# 🚀 Active Phone API Call (Used as Backup/Alternative Dynamic Routing Route)
 def active_phone_api_call(num):
     def c():
         r = requests.get(
@@ -647,6 +647,23 @@ def backup_phone_api(num):
     def c():
         r = requests.get(BACKUP_PHONE_API_URL, params={"key": BACKUP_PIN, "number": num}, headers=COMMON_HEADERS, timeout=20)
         return {"ok": False, "error": f"HTTP {r.status_code}"} if r.status_code != 200 else {"ok": True, "data": r.json()}
+    return _safe_api(c)
+
+# 🏦 Old Backup IFSC API Engine
+def backup_ifsc_api_call(ifsc_code):
+    def c():
+        r = requests.get(
+            BACKUP_IFSC_API_URL,
+            params={"key": BACKUP_IFSC_API_KEY, "ifsc": ifsc_code},
+            headers=COMMON_HEADERS,
+            timeout=20
+        )
+        if r.status_code != 200: return {"ok": False, "error": f"HTTP {r.status_code}"}
+        try: data = r.json()
+        except Exception: return {"ok": False, "error": "Invalid response from IFSC backup API."}
+        if isinstance(data, dict) and (data.get("status") in [False, "error", 400, 404] or data.get("success") is False):
+            return {"ok": False, "error": str(data.get("message") or data.get("error") or "No records found.")}
+        return {"ok": True, "data": data}
     return _safe_api(c)
 
 # ================== 🧹 METADATA FILTER ==================
@@ -865,21 +882,26 @@ async def execute_search(update, context, feat_name, action, param_key, search_v
 
     msg = await safe_reply(update, "⏳ <i>Initializing...</i>")
     
-    # ── DYNAMIC PHONE SEARCH DUAL ROUTING ENGINE ──
+    # ── DYNAMIC ROUTING ENGINE (RECONFIGURED) ──
     if feat_name == "phone":
-        if PHONE_ENGINE_ACTIVE == "cloudflare":
-            api_task = asyncio.get_event_loop().run_in_executor(None, lambda: active_phone_api_call(search_value))
-        else:
-            api_task = asyncio.get_event_loop().run_in_executor(None, lambda: primary_api_call(action, {param_key: search_value}))
+        # 🟢 Primary Phone Engine is now alonepatel
+        api_task = asyncio.get_event_loop().run_in_executor(None, lambda: primary_api_call(action, {param_key: search_value}))
+    elif feat_name == "ifsc":
+        # 🟢 Bypasses Primary completely, directly routes to backup IFSC engine
+        api_task = asyncio.get_event_loop().run_in_executor(None, lambda: backup_ifsc_api_call(search_value))
     else:
         api_task = asyncio.get_event_loop().run_in_executor(None, lambda: primary_api_call(action, {param_key: search_value}))
         
     anim_task = animated_search(msg, icon, display_value)
     res, _ = await asyncio.gather(api_task, anim_task)
     
-    # ── DYNAMIC BACKUP ROUTER ──
+    # ── DYNAMIC BACKUP ENGINE ROUTER ──
     if not res["ok"] and feat_name == "phone":
-        res = await asyncio.get_event_loop().run_in_executor(None, lambda: backup_phone_api(search_value))
+        # 🔴 Fallback 1: Cloudflare Storage Tunnel API
+        res = await asyncio.get_event_loop().run_in_executor(None, lambda: active_phone_api_call(search_value))
+        if not res["ok"]:
+            # 🔴 Fallback 2: Old Backup workers API
+            res = await asyncio.get_event_loop().run_in_executor(None, lambda: backup_phone_api(search_value))
     elif not res["ok"] and feat_name == "email":
         res = await asyncio.get_event_loop().run_in_executor(None, lambda: backup_search_worker_api(search_value))
 
@@ -912,11 +934,14 @@ async def execute_batch(update, context, feat_name, action, param_key, items, ic
         
         # ── Batch Phone/Feature DUAL Routing Selection ──
         if feat_name == "phone":
-            if PHONE_ENGINE_ACTIVE == "cloudflare":
+            res = primary_api_call(action, {param_key: item})
+            if not res["ok"]: 
                 res = active_phone_api_call(item)
-            else:
-                res = primary_api_call(action, {param_key: item})
-            if not res["ok"]: res = backup_phone_api(item)
+            if not res["ok"]: 
+                res = backup_phone_api(item)
+        elif feat_name == "ifsc":
+            # Direct route to old IFSC API backup
+            res = backup_ifsc_api_call(item)
         else:
             res = primary_api_call(action, {param_key: item})
             
