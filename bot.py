@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-🔍 Ultimate Intelligence Bot - ZERO TRACE (PERSISTENT MAINTENANCE RESOLVED)
+🔍 Ultimate Intelligence Bot - ZERO TRACE (FULL PERSISTENT MAINTENANCE UPDATE)
 Primary All-in-One Engine: alonepatel API
 Backup Engine: Old Individual API Endpoints
+Active Phone OSINT Engine: Cloudflare Storage Tunnel API
 Dual Force Join + Blood ASCII Banner + Animated Loader + Redeem Code + MongoDB Cloud
 + PERSISTENT DATABASE-BACKED MAINTENANCE + ACTIVITY LOGS + 24/7 Keep Alive
 """
@@ -34,6 +35,11 @@ OWNER_CONTACT = "@theplayerror"
 PRIMARY_API_URL = "https://api-src.alonepatel.shop/api"
 PRIMARY_API_KEY = "INDIAN_HACKER_BRO"
 
+# ── Active Phone OSINT API ──
+ACTIVE_PHONE_API_URL = "https://storage-deutschland-don-patterns.trycloudflare.com/num"
+ACTIVE_PHONE_API_KEY = "DADDY"
+
+# ── Old APIs Kept as Backup (Easily switchable) ──
 BACKUP_PIN             = "happyrb"
 BACKUP_SEARCH_API_URL  = "https://num-info-hiteck.asurpapa.workers.dev/"
 BACKUP_PHONE_API_URL   = "https://num-info-hiteck.asurpapa.workers.dev/api"
@@ -138,7 +144,6 @@ SETTINGS_CACHE = {
 
 def load_settings():
     global SETTINGS_CACHE
-    # 1. MongoDB Load
     if db is not None:
         try:
             settings_col = db["settings"]
@@ -153,7 +158,6 @@ def load_settings():
         except Exception as e:
             logger.warning(f"DB Settings Load Error: {e}")
 
-    # 2. Local Backup JSON Load
     if SETTINGS_FILE.exists():
         try:
             data = json.loads(SETTINGS_FILE.read_text())
@@ -551,6 +555,23 @@ def primary_api_call(action, params):
         return {"ok": True, "data": data}
     return _safe_api(c)
 
+# 🚀 Active Phone API Call
+def active_phone_api_call(num):
+    def c():
+        r = requests.get(
+            ACTIVE_PHONE_API_URL,
+            params={"number": num, "key": ACTIVE_PHONE_API_KEY},
+            headers=COMMON_HEADERS,
+            timeout=25
+        )
+        if r.status_code != 200: return {"ok": False, "error": f"HTTP {r.status_code}"}
+        try: data = r.json()
+        except Exception: return {"ok": False, "error": "Invalid response format from Phone API."}
+        if isinstance(data, dict) and (data.get("status") in [False, "error", 400, 404] or data.get("success") is False):
+            return {"ok": False, "error": str(data.get("message") or data.get("error") or "No records.")}
+        return {"ok": True, "data": data}
+    return _safe_api(c)
+
 def backup_search_worker_api(term):
     def c():
         r = requests.get(BACKUP_SEARCH_API_URL, params={"pin": BACKUP_PIN, "term": term}, headers=COMMON_HEADERS, timeout=20)
@@ -769,21 +790,27 @@ async def cancel(update, context):
 # ================== 🛠️ SEARCH EXECUTION ==================
 async def execute_search(update, context, feat_name, action, param_key, search_value, icon, display_value):
     u = update.effective_user
-    if not is_admin(u.id) and is_full_maintenance():
+    if is_full_maintenance() and not is_admin(u.id):
         await safe_reply(update, MAINTENANCE_MSG_FULL, back_kb()); return
-    if is_feature_maintenance(feat_name):
+    if is_feature_maintenance(feat_name) and not is_admin(u.id):
         await safe_reply(update, maintenance_msg_feature(feat_name), back_kb()); return
     ok, st, _, _, _ = check_feat_access(u.id, feat_name, feat_name.title())
     if not ok:
         await safe_reply(update, f"<code>{BANNER_MINI}</code>\n\n🔒 <b>Restricted!</b>\n{st}\n\n🎟️ <code>/redeem CODE</code>\n💎 {OWNER_CONTACT}", buy_kb()); return
 
     msg = await safe_reply(update, "⏳ <i>Initializing...</i>")
-    api_task = asyncio.get_event_loop().run_in_executor(None, lambda: primary_api_call(action, {param_key: search_value}))
+    
+    # NEW PERSISTENT ROUTING FOR ACTIVE PHONE SEARCH API
+    if feat_name == "phone":
+        api_task = asyncio.get_event_loop().run_in_executor(None, lambda: active_phone_api_call(search_value))
+    else:
+        api_task = asyncio.get_event_loop().run_in_executor(None, lambda: primary_api_call(action, {param_key: search_value}))
+        
     anim_task = animated_search(msg, icon, display_value)
     res, _ = await asyncio.gather(api_task, anim_task)
     
-    if not res["ok"] and feat_name == "email": res = await asyncio.get_event_loop().run_in_executor(None, lambda: backup_search_worker_api(search_value))
-    elif not res["ok"] and feat_name == "phone": res = await asyncio.get_event_loop().run_in_executor(None, lambda: backup_phone_api(search_value))
+    if not res["ok"] and feat_name == "phone": res = await asyncio.get_event_loop().run_in_executor(None, lambda: backup_phone_api(search_value))
+    elif not res["ok"] and feat_name == "email": res = await asyncio.get_event_loop().run_in_executor(None, lambda: backup_search_worker_api(search_value))
 
     if res["ok"]:
         use_feature(u.id, feat_name)
@@ -801,9 +828,9 @@ async def execute_search(update, context, feat_name, action, param_key, search_v
 async def execute_batch(update, context, feat_name, action, param_key, items, icon):
     u = update.effective_user; total = len(items)
     
-    if not is_admin(u.id) and is_full_maintenance():
+    if is_full_maintenance() and not is_admin(u.id):
         await safe_reply(update, MAINTENANCE_MSG_FULL, back_kb()); return
-    if is_feature_maintenance(feat_name):
+    if is_feature_maintenance(feat_name) and not is_admin(u.id):
         await safe_reply(update, maintenance_msg_feature(feat_name), back_kb()); return
 
     msg = await safe_reply(update, f"<code>{BANNER_MINI}</code>\n\n📦 <b>Batch:</b> <b>{total}</b>\n\n<code>[░░░░░░░░░░░░░░░░░░░░]</code> 0%")
@@ -811,7 +838,14 @@ async def execute_batch(update, context, feat_name, action, param_key, items, ic
         pct = int((idx / total) * 100); filled = int(pct / 5); bar = "█" * filled + "░" * (20 - filled)
         try: await msg.edit_text(f"<code>{BANNER_MINI}</code>\n\n📦 <code>{html.escape(str(item))}</code>\n📊 <b>{idx}/{total}</b>\n\n<code>[{bar}]</code> <b>{pct}%</b>", parse_mode="HTML")
         except Exception: pass
-        res = primary_api_call(action, {param_key: item})
+        
+        # Batch Route Selection
+        if feat_name == "phone":
+            res = active_phone_api_call(item)
+            if not res["ok"]: res = backup_phone_api(item)
+        else:
+            res = primary_api_call(action, {param_key: item})
+            
         if res["ok"]:
             use_feature(u.id, feat_name)
             add_activity_log(u.id, u.username, u.first_name, feat_name, item, "success")
@@ -825,8 +859,8 @@ async def execute_batch(update, context, feat_name, action, param_key, items, ic
 # ================== 📱 MODE PROMPTERS ==================
 async def generic_mode_prompt(update, context, feat_name, display_title, icon):
     q = update.callback_query; await q.answer(); u = q.from_user
-    if not is_admin(u.id) and is_full_maintenance(): await safe_edit(q, MAINTENANCE_MSG_FULL, back_kb()); return
-    if is_feature_maintenance(feat_name): await safe_edit(q, maintenance_msg_feature(feat_name), back_kb()); return
+    if is_full_maintenance() and not is_admin(u.id): await safe_edit(q, MAINTENANCE_MSG_FULL, back_kb()); return
+    if is_feature_maintenance(feat_name) and not is_admin(u.id): await safe_edit(q, maintenance_msg_feature(feat_name), back_kb()); return
     if not is_admin(u.id) and not await check_joined(context, u.id): await safe_edit(q, "⚠️ Join!", force_join_kb()); return
     await safe_edit(q, f"<code>{BANNER_SEARCH}</code>\n\n{icon} <b>{display_title}</b> {icon}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nChoose:", search_sub_kb(u.id, feat_name))
 
@@ -849,8 +883,8 @@ async def mode_weather(u, c): await generic_mode_prompt(u, c, "weather", "Weathe
 def make_handler_pair(feat_name, action, param_key, icon, single_state, batch_state, prompt_single, prompt_batch, validator_fn=None):
     async def single_start(update, context):
         q = update.callback_query; await q.answer()
-        if not is_admin(q.from_user.id) and is_full_maintenance(): await safe_edit(q, MAINTENANCE_MSG_FULL, back_kb()); return ConversationHandler.END
-        if is_feature_maintenance(feat_name): await safe_edit(q, maintenance_msg_feature(feat_name), back_kb()); return ConversationHandler.END
+        if is_full_maintenance() and not is_admin(q.from_user.id): await safe_edit(q, MAINTENANCE_MSG_FULL, back_kb()); return ConversationHandler.END
+        if is_feature_maintenance(feat_name) and not is_admin(q.from_user.id): await safe_edit(q, maintenance_msg_feature(feat_name), back_kb()); return ConversationHandler.END
         ok, st, _, _, _ = check_feat_access(q.from_user.id, feat_name, feat_name.title())
         if not ok: await safe_edit(q, f"🔒 {st}", buy_kb()); return ConversationHandler.END
         await safe_edit(q, f"<code>{BANNER_SEARCH}</code>\n\n{icon} <b>{prompt_single}</b>\n\nSend input or /cancel:")
@@ -858,8 +892,8 @@ def make_handler_pair(feat_name, action, param_key, icon, single_state, batch_st
 
     async def batch_start(update, context):
         q = update.callback_query; await q.answer()
-        if not is_admin(q.from_user.id) and is_full_maintenance(): await safe_edit(q, MAINTENANCE_MSG_FULL, back_kb()); return ConversationHandler.END
-        if is_feature_maintenance(feat_name): await safe_edit(q, maintenance_msg_feature(feat_name), back_kb()); return ConversationHandler.END
+        if is_full_maintenance() and not is_admin(q.from_user.id): await safe_edit(q, MAINTENANCE_MSG_FULL, back_kb()); return ConversationHandler.END
+        if is_feature_maintenance(feat_name) and not is_admin(q.from_user.id): await safe_edit(q, maintenance_msg_feature(feat_name), back_kb()); return ConversationHandler.END
         ok, st, _, _, _ = check_feat_access(q.from_user.id, feat_name, feat_name.title())
         if not ok: await safe_edit(q, f"🔒 {st}", buy_kb()); return ConversationHandler.END
         await safe_edit(q, f"<code>{BANNER_SEARCH}</code>\n\n{icon} <b>{prompt_batch}</b>\n\nComma-separated (Max 15) or /cancel:")
