@@ -29,7 +29,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ================== ⚙️ CONFIG ==================
-# Direct Token binding (Never overridden by old Render environment variables)
 BOT_TOKEN     = "8642873626:AAG84pEyNRjx6VYilnGlIpNEILD_ZRlNdE8"
 ADMIN_IDS     = [5057489358, 1968142314]
 OWNER_CONTACT = "@theplayerror"
@@ -1768,15 +1767,14 @@ async def general_fallback_handler(update: Update, context: ContextTypes.DEFAULT
 
 # ================== 🏁 MAIN ==================
 def main():
-    # 1. Force flush any stale Telegram webhooks directly before starting polling
     try:
-        r = requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook?drop_pending_updates=true", timeout=10)
-        bot_data = requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/getMe", timeout=10).json()
+        requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook?drop_pending_updates=true", timeout=8)
+        bot_data = requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/getMe", timeout=8).json()
         if bot_data.get("ok"):
             b_user = bot_data["result"]["username"]
             print("\n" + "="*50, flush=True)
             print(f"🤖 CONNECTED BOT: @{b_user}", flush=True)
-            print(f"👉 CLICK HERE TO OPEN: https://t.me/{b_user}", flush=True)
+            print(f"👉 CLICK TO START: https://t.me/{b_user}", flush=True)
             print("="*50 + "\n", flush=True)
     except Exception as e:
         print(f"⚠️ Pre-init check error: {e}", flush=True)
@@ -1787,11 +1785,7 @@ def main():
     threading.Thread(target=cleanup_old_logs_loop, daemon=True).start()
     print("🧹 Logs Auto-Cleanup Engine Started!", flush=True)
 
-    app = (
-        ApplicationBuilder()
-        .token(BOT_TOKEN)
-        .build()
-    )
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     C = ConversationHandler; CQ = CallbackQueryHandler; MH = MessageHandler; CMD = CommandHandler
     F = filters.TEXT & ~filters.COMMAND; UF = [CMD("cancel", cancel), CMD("start", start)]
@@ -1802,11 +1796,11 @@ def main():
     # Track every incoming update in logs
     app.add_handler(TypeHandler(Update, global_incoming_tracker), group=-1)
 
-    # Core Start and Cancel handlers
-    app.add_handler(CMD("start", start))
-    app.add_handler(CMD("cancel", cancel))
-    app.add_handler(CMD("admin", admin_panel))
-    app.add_handler(CMD("redeem", redeem_command))
+    # Core Start and Cancel handlers (Registered at TOP priority)
+    app.add_handler(CMD("start", start), group=0)
+    app.add_handler(CMD("cancel", cancel), group=0)
+    app.add_handler(CMD("admin", admin_panel), group=0)
+    app.add_handler(CMD("redeem", redeem_command), group=0)
 
     convs = [
         C(entry_points=[CQ(p_ss,pattern="^phone_single$")],states={PHONE_SINGLE:[MH(F,p_sp)]},fallbacks=UF,per_message=False,allow_reentry=True),
