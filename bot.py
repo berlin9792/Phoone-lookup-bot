@@ -29,7 +29,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ================== ⚙️ CONFIG ==================
-BOT_TOKEN     = "8642873626:AAH96_Bgt51OKTeE9zeOMakk4YJXeobNWiQ"
+BOT_TOKEN     = "8943597033:AAEF7OzTCWaWXv5D80LDR-iTKpm1vA1z4Go"
 ADMIN_IDS     = [5057489358, 1968142314]
 OWNER_CONTACT = "@theplayerror"
 
