@@ -2,6 +2,7 @@
 """
 🔍 Ultimate Intelligence Bot - ZERO TRACE (BULLETPROOF INSTANT RESPONSE)
 + CUSTOM ERROR POPUP DIALOG SYSTEM
++ UPDATED PRICING PLANS
 """
 
 import json, os, threading, requests, logging, asyncio, re, time, html, secrets, sys
@@ -65,12 +66,13 @@ COMMON_HEADERS = {
 
 FREE_LIMIT = 2
 
+# ================== 💎 UPDATED PLANS CONFIG ==================
 PLANS = {
     "trial": {"name": "Trial", "days": 0, "price": 0, "daily_limit": 0, "unlimited": False, "is_free": True},
-    "7days": {"name": "7 Days", "days": 7, "price": 50, "daily_limit": 10, "unlimited": False, "is_free": False},
-    "30days": {"name": "30 Days", "days": 30, "price": 130, "daily_limit": 20, "unlimited": False, "is_free": False},
-    "6months": {"name": "6 Months", "days": 180, "price": 300, "daily_limit": 35, "unlimited": False, "is_free": False},
-    "12months": {"name": "12 Months", "days": 365, "price": 799, "daily_limit": 999999, "unlimited": True, "is_free": False},
+    "7days": {"name": "7 Days", "days": 7, "price": 70, "daily_limit": 5, "unlimited": False, "is_free": False},
+    "30days": {"name": "30 Days", "days": 30, "price": 170, "daily_limit": 10, "unlimited": False, "is_free": False},
+    "6months": {"name": "6 Months", "days": 180, "price": 350, "daily_limit": 25, "unlimited": False, "is_free": False},
+    "12months": {"name": "12 Months", "days": 365, "price": 849, "daily_limit": 999999, "unlimited": True, "is_free": False},
 }
 
 # ================== 🛡️ HARDCODED PROTECTED ADMIN IDS & NUMBERS ==================
@@ -79,53 +81,30 @@ HARDCODED_PROTECTED_ADMIN_IDS = {"5057489358", "1968142314"}
 
 # ================== 🎨 CUSTOM ERROR POPUP DIALOG SYSTEM ==================
 def make_popup(title, icon, lines, footer=None):
-    """
-    Build a monospaced Unicode error popup dialog.
-    Renders perfectly on all Telegram clients (mobile, desktop, web).
-    
-    title: Header text (e.g. "ACCESS DENIED")
-    icon:  Emoji icon (e.g. "🚫", "⚠️", "🛡️")
-    lines: List of message lines (strings)
-    footer: Optional footer text
-    """
-    W = 35  # Inner width of the box
-    
-    # Build top border
+    W = 35
     top = f"╭{'─' * (W + 2)}╮"
     bot = f"╰{'─' * (W + 2)}╯"
     sep = f"├{'─' * (W + 2)}┤"
     
     def pad(text, width=W):
-        """Pad text to fit inside box with equal spacing"""
         visible_len = len(text)
         padding = max(0, width - visible_len)
         return f"│ {text}{' ' * padding} │"
     
     empty = pad("", W)
-    
-    # Header
     header_text = f"{icon} {title}"
     header_line = pad(header_text, W)
     
-    # Body lines
     body_lines = []
     for line in lines:
-        # Word wrap long lines
         while len(line) > W - 2:
             body_lines.append(pad(line[:W-2], W))
             line = line[W-2:]
         body_lines.append(pad(line, W))
     
-    # Footer
-    footer_line = ""
-    if footer:
-        footer_line = pad(footer, W)
+    footer_line = pad(footer, W) if footer else ""
     
-    # Assemble
-    parts = [f"<code>{top}"]
-    parts.append(header_line)
-    parts.append(sep)
-    parts.append(empty)
+    parts = [f"<code>{top}", header_line, sep, empty]
     for bl in body_lines:
         parts.append(bl)
     parts.append(empty)
@@ -189,7 +168,7 @@ def popup_access_denied(status_text):
             f"📊 Status: {status_text}",
             "",
             "💎 Upgrade to Premium for",
-            "   unlimited searches.",
+            "   more searches.",
             "",
             "🎟️ Or use: /redeem CODE"
         ],
@@ -296,7 +275,7 @@ def popup_expired_plan():
             "   EXPIRED!",
             "",
             "💎 Renew now to continue",
-            "   unlimited searches.",
+            "   daily searches.",
             "",
             "🎟️ Or use: /redeem CODE"
         ],
@@ -312,7 +291,7 @@ def popup_daily_limit():
             "",
             "⏰ Limit resets at midnight.",
             "",
-            "💎 Upgrade for more daily",
+            "💎 Upgrade for higher daily",
             "   searches or unlimited."
         ],
         f"💰 Upgrade: {OWNER_CONTACT}"
@@ -325,15 +304,14 @@ def popup_trial_over():
             "🔒 Your free trial searches",
             "   are all used up!",
             "",
-            "💎 Get Premium for unlimited",
-            "   access to 15+ tools.",
+            "💎 Get Premium to access",
+            "   15+ OSINT tools.",
             "",
             "🎟️ Or use: /redeem CODE"
         ],
         f"💰 Buy: {OWNER_CONTACT}"
     )
 
-# Dismiss button keyboard
 def dismiss_kb():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✖ Dismiss", callback_data="dismiss_popup")],
@@ -352,8 +330,7 @@ def dismiss_only_kb():
         [InlineKeyboardButton("✖ OK", callback_data="dismiss_popup")]
     ])
 
-# ================== END POPUP SYSTEM ==================
-
+# ================== NORMALIZATION & PROTECTION HELPERS ==================
 def normalize_number(val):
     if not val: return ""
     clean = str(val).replace("+", "").replace("-", "").replace(" ", "").strip()
@@ -364,12 +341,10 @@ def normalize_number(val):
     return clean
 
 def is_hardcoded_protected_number(val):
-    normalized = normalize_number(val)
-    return normalized in HARDCODED_PROTECTED_NUMBERS
+    return normalize_number(val) in HARDCODED_PROTECTED_NUMBERS
 
 def is_hardcoded_protected_admin_id(val):
-    clean = str(val).strip()
-    return clean in HARDCODED_PROTECTED_ADMIN_IDS
+    return str(val).strip() in HARDCODED_PROTECTED_ADMIN_IDS
 
 # ================== 🛡️ PROTECTED IDS/NUMBERS SYSTEM ==================
 PROTECTED_ENTRIES = set()
@@ -439,7 +414,6 @@ def is_protected(search_value):
     return False
 
 def is_blocked_search(feat_name, search_value):
-    """Universal block checker - returns (is_blocked, popup_message, log_status)"""
     if feat_name in ["tg", "tgid"]:
         if is_hardcoded_protected_admin_id(search_value):
             return True, popup_admin_id_blocked(), "blocked_admin_id"
@@ -1083,10 +1057,11 @@ def maintenance_kb():
 
 def back_kb(): return InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menu", callback_data="main_menu")]])
 def buy_kb(): return InlineKeyboardMarkup([[InlineKeyboardButton("💬 Buy", url=f"https://t.me/{OWNER_CONTACT.replace('@','')}")],[InlineKeyboardButton("🔙 Menu", callback_data="main_menu")]])
+
 def plan_kb(pf):
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🥉 7D-₹50", callback_data=f"{pf}_7days")],[InlineKeyboardButton("🥈 30D-₹130", callback_data=f"{pf}_30days")],
-        [InlineKeyboardButton("🥇 6M-₹300", callback_data=f"{pf}_6months")],[InlineKeyboardButton("💎 12M-₹799", callback_data=f"{pf}_12months")],
+        [InlineKeyboardButton("🥉 7D-₹70 (5/d)", callback_data=f"{pf}_7days")],[InlineKeyboardButton("🥈 30D-₹170 (10/d)", callback_data=f"{pf}_30days")],
+        [InlineKeyboardButton("🥇 6M-₹350 (25/d)", callback_data=f"{pf}_6months")],[InlineKeyboardButton("💎 12M-₹849 (∞)", callback_data=f"{pf}_12months")],
         [InlineKeyboardButton("⚙️ Custom", callback_data=f"{pf}_custom")],[InlineKeyboardButton("❌ Cancel", callback_data="admin_back")]
     ])
 
@@ -1179,7 +1154,6 @@ async def execute_search(update, context, feat_name, action, param_key, search_v
     
     ok, st, _, _, _ = check_feat_access(u.id, feat_name, feat_name.title())
     if not ok:
-        # Determine which popup to show
         if "Expired" in st:
             popup = popup_expired_plan()
         elif "Limit" in st:
@@ -1392,12 +1366,51 @@ async def status_check(update, context):
 
 async def help_menu(update, context):
     q = update.callback_query; await q.answer()
-    txt = f"<code>{BANNER}</code>\n\n❓ <b>HELP</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n📱 Phone: <code>9876543210</code>\n🪪 Aadhaar: <code>123456789012</code>\n💳 UPI: <code>ram@paytm</code>\n📧 Email: <code>user@gmail.com</code>\n🚗 Vehicle: <code>DL8CAF5030</code>\n🏦 IFSC: <code>SBIN0001234</code>\n👤 TG: <code>5057489358</code>\n📸 Insta: <code>cristiano</code>\n📱 IMEI: <code>354751093234567</code>\n📮 Pincode: <code>110001</code>\n🌍 Country: <code>India</code>\n💰 Paytm: <code>9876543210</code>\n🌐 IP: <code>8.8.8.8</code>\n🌤️ Weather: <code>Mumbai</code>\n🆔 TG ID: <code>8771611214</code>\n\n💎 Plans: 7D-₹50 | 30D-₹130 | 6M-₹300 | 12M-₹799\n🎟️ <code>/redeem CODE</code>\n📲 {OWNER_CONTACT}"
+    txt = (
+        f"<code>{BANNER}</code>\n\n"
+        f"❓ <b>HELP & FEATURE EXAMPLES</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"🎯 <b>15+ Powerful OSINT Tools</b>\n\n"
+        f"📱 Phone: <code>9876543210</code>\n"
+        f"🪪 Aadhaar: <code>123456789012</code>\n"
+        f"💳 UPI: <code>ram@paytm</code>\n"
+        f"📧 Email: <code>user@gmail.com</code>\n"
+        f"🚗 Vehicle: <code>DL8CAF5030</code>\n"
+        f"🏦 IFSC: <code>SBIN0001234</code>\n"
+        f"👤 TG: <code>5057489358</code>\n"
+        f"📸 Insta: <code>cristiano</code>\n"
+        f"📱 IMEI: <code>354751093234567</code>\n"
+        f"📮 Pincode: <code>110001</code>\n"
+        f"🌍 Country: <code>India</code>\n"
+        f"💰 Paytm: <code>9876543210</code>\n"
+        f"🌐 IP: <code>8.8.8.8</code>\n"
+        f"🌤️ Weather: <code>Mumbai</code>\n"
+        f"🆔 TG ID: <code>8771611214</code>\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"💎 <b>Plans:</b>\n"
+        f"  🥉 7D → ₹70 (5/day)\n"
+        f"  🥈 30D → ₹170 (10/day)\n"
+        f"  🥇 6M → ₹350 (25/day)\n"
+        f"  💎 12M → ₹849 (∞ Unlimited)\n\n"
+        f"🎟️ <code>/redeem CODE</code>\n"
+        f"📲 {OWNER_CONTACT}"
+    )
     await safe_edit(q, txt, back_kb())
 
 async def buy(update, context):
     q = update.callback_query; await q.answer()
-    await safe_edit(q, f"<code>{BANNER}</code>\n\n💎 <b>PREMIUM</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n🥉 7D-₹50 (10/day)\n🥈 30D-₹130 (20/day)\n🥇 6M-₹300 (35/day)\n💎 12M-₹799 (∞)\n\n📲 {OWNER_CONTACT}\n🆔 <code>{q.from_user.id}</code>", buy_kb())
+    await safe_edit(q, (
+        f"<code>{BANNER}</code>\n\n"
+        f"💎 <b>PREMIUM PLANS</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"🥉 <b>7 Days:</b> ₹70 (5/day)\n"
+        f"🥈 <b>30 Days:</b> ₹170 (10/day)\n"
+        f"🥇 <b>6 Months:</b> ₹350 (25/day)\n"
+        f"💎 <b>12 Months:</b> ₹849 (∞ Unlimited)\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"📲 <b>Contact:</b> {OWNER_CONTACT}\n"
+        f"🆔 <b>Your ID:</b> <code>{q.from_user.id}</code>"
+    ), buy_kb())
 
 async def redeem_command(update, context):
     user = update.effective_user
@@ -1565,7 +1578,7 @@ async def adm_add_plan(u,c):
     pm = {"plan_7days":"7days","plan_30days":"30days","plan_6months":"6months","plan_12months":"12months"}
     pk = pm.get(q.data,"7days"); uid = c.user_data.get("admin_uid"); plan = PLANS.get(pk)
     exp = upgrade(int(uid),pk); dl = "∞" if plan["unlimited"] else f"{plan['daily_limit']}/day"
-    await safe_edit(q, f"✅ <b>Activated!</b>\n🆔 <code>{uid}</code>\n📦 <b>{plan['name']}</b>\n📅 <code>{exp}</code>", admin_kb()); return ConversationHandler.END
+    await safe_edit(q, f"✅ <b>Activated!</b>\n🆔 <code>{uid}</code>\n📦 <b>{plan['name']}</b>\n📅 <code>{exp}</code>\n⚡ <code>{dl}</code>", admin_kb()); return ConversationHandler.END
 
 async def adm_rem_s(u,c):
     q = u.callback_query; await q.answer()
@@ -1589,8 +1602,8 @@ async def adm_sp_set(u,c):
     q = u.callback_query; await q.answer()
     if q.data == "admin_back": await admin_panel(u,c); return ConversationHandler.END
     pm = {"plan_7days":"7days","plan_30days":"30days","plan_6months":"6months","plan_12months":"12months"}
-    pk = pm.get(q.data,"7days"); uid = c.user_data.get("admin_uid"); exp = upgrade(int(uid),pk)
-    await safe_edit(q, f"✅ Updated! <code>{uid}</code> → <code>{exp}</code>", admin_kb()); return ConversationHandler.END
+    pk = pm.get(q.data,"7days"); uid = c.user_data.get("admin_uid"); plan = PLANS.get(pk); exp = upgrade(int(uid),pk)
+    await safe_edit(q, f"✅ Updated! <code>{uid}</code> → <b>{plan['name']}</b> (<code>{exp}</code>)", admin_kb()); return ConversationHandler.END
 
 # ================== 📖 PAGINATED USER LIST ==================
 async def adm_list(update, context):
@@ -1845,3 +1858,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+                
