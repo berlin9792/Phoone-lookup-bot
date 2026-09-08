@@ -1723,27 +1723,80 @@ async def adm_sp_set(u, c):
     exp = upgrade(int(uid), pk)
     await safe_edit(q, f"✅ <b>Updated!</b>\n🆔 <code>{uid}</code>\n📦 <b>{plan['name']}</b>\n📅 <code>{exp}</code>", admin_kb()); return ConversationHandler.END
 
+# ================== 📖 ADMIN USERS PAGINATION SYSTEM ==================
 async def adm_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query; await q.answer()
-    if not is_admin(q.from_user.id): return
+    q = update.callback_query
+    await q.answer()
+    if not is_admin(q.from_user.id): 
+        return
+
+    # Parse target page from callback data
+    data = q.data
+    page = 0
+    if data.startswith("admin_list_page_"):
+        try:
+            page = int(data.split("_")[-1])
+        except ValueError:
+            page = 0
+
     users = load_users()
     if not users: 
-        await safe_edit(q, "📋 No users in database.", admin_kb()); return
-    txt = f"<code>{BANNER_MINI}</code>\n\n📋 <b>ALL USERS LIST ({len(users)})</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-    for uid, info in list(users.items()):
+        await safe_edit(q, "📋 No users in database.", admin_kb())
+        return
+
+    # Ensure stable sorting layout
+    def sort_key(item):
+        try:
+            return int(item[0])
+        except ValueError:
+            return item[0]
+
+    sorted_users = sorted(users.items(), key=sort_key)
+    total_users = len(sorted_users)
+    
+    USERS_PER_PAGE = 30
+    total_pages = (total_users + USERS_PER_PAGE - 1) // USERS_PER_PAGE
+    if page < 0: page = 0
+    if page >= total_pages: page = max(0, total_pages - 1)
+
+    start_idx = page * USERS_PER_PAGE
+    end_idx = start_idx + USERS_PER_PAGE
+    current_page_users = sorted_users[start_idx:end_idx]
+
+    txt = (
+        f"<code>{BANNER_MINI}</code>\n\n"
+        f"📋 <b>ALL USERS LIST ({total_users})</b>\n"
+        f"📖 <b>Page:</b> <code>{page + 1}/{total_pages}</code>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    )
+
+    for uid, info in current_page_users:
         ts = info.get("total_searches", 0)
-        if int(uid) in ADMIN_IDS: st = "🛡️ Admin"
+        if int(uid) in ADMIN_IDS: 
+            st = "🛡️ Admin"
         elif info.get("is_premium") and info.get("expiry"):
             try: 
                 ed = date.fromisoformat(info["expiry"])
                 st = f"💎 {(ed-date.today()).days}d" if date.today() <= ed else "🔴 Expired"
-            except Exception: st = "⚪ Error"
-        else: st = "🆓 Free"
-        line = f"👤 <code>{uid}</code> | {st} | 🔍 <code>{ts}</code>\n"
-        if len(txt) + len(line) > 4000:
-            txt += "\n⚠️ <i>List too long... Truncated for safety.</i>"; break
-        txt += line
-    await safe_edit(q, txt, admin_kb())
+            except Exception: 
+                st = "⚪ Error"
+        else: 
+            st = "🆓 Free"
+        txt += f"👤 <code>{uid}</code> | {st} | 🔍 <code>{ts}</code>\n"
+
+    # Navigation layout
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton("⬅️ Previous", callback_data=f"admin_list_page_{page - 1}"))
+    if end_idx < total_users:
+        nav_buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"admin_list_page_{page + 1}"))
+
+    kbd = []
+    if nav_buttons:
+        kbd.append(nav_buttons)
+    kbd.append([InlineKeyboardButton("🔙 Admin Menu", callback_data="admin_back")])
+
+    await safe_edit(q, txt, InlineKeyboardMarkup(kbd))
 
 async def adm_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
@@ -1998,7 +2051,7 @@ def main():
         ("mode_pin",mode_pin),("mode_country",mode_country),("mode_paytm",mode_paytm),
         ("mode_ip",mode_ip),("mode_weather",mode_weather),("mode_tgid",mode_tgid),
         ("redeem_info",redeem_info),("profile",profile),("status",status_check),
-        ("help",help_menu),("buy",buy),("admin_list",adm_list),
+        ("help",help_menu),("buy",buy),
         ("admin_stats",adm_stats),("admin_back",admin_back),("admin_free_monitor",adm_monitor),
         ("admin_redeem_list",admin_redeem_list),("admin_maintenance",admin_maintenance),
         ("admin_logs",admin_logs_menu),("logs_recent",logs_recent),("logs_stats",logs_stats),
@@ -2007,6 +2060,10 @@ def main():
     ]
     for pattern, fn in callbacks:
         app.add_handler(CQ(fn, pattern=f"^{pattern}$"))
+    
+    # Custom Paginated User List Handlers
+    app.add_handler(CQ(adm_list, pattern=r"^admin_list$"))
+    app.add_handler(CQ(adm_list, pattern=r"^admin_list_page_\d+$"))
     
     app.add_handler(CQ(maint_toggle_handler, pattern=r"^maint_toggle_"))
     app.add_handler(CQ(logs_by_feature, pattern=r"^logs_feat_"))
