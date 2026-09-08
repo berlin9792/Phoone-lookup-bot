@@ -6,7 +6,7 @@ Backup Engine: Old Individual API Endpoints
 Active Phone OSINT Engine: Cloudflare Storage Tunnel API (Config Switchable)
 Dual Force Join + Blood ASCII Banner + Animated Loader + Redeem Code + MongoDB Cloud
 + PERSISTENT DATABASE-BACKED MAINTENANCE + ACTIVITY LOGS + 24/7 Keep Alive + AUTO-LOG CLEANUP (3 DAYS)
-+ TG ID TO INFO FEATURE + PROTECTED IDS/NUMBERS SYSTEM + FLOODWAIT / RATE LIMIT FIX
++ TG ID TO INFO FEATURE + PROTECTED IDS/NUMBERS SYSTEM + FLOODWAIT FIX + INSTANT RESPONSE FIX
 """
 
 import json, os, threading, requests, logging, asyncio, re, time, html, secrets
@@ -30,7 +30,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ================== ⚙️ CONFIG ==================
-BOT_TOKEN     = os.environ.get("BOT_TOKEN", "8642873626:AAFy5F79opcK_NMJ7NgGItd6sRrfbOc4TJU")
+BOT_TOKEN     = os.environ.get("BOT_TOKEN", "8642873626:AAG84pEyNRjx6VYilnGlIpNEILD_ZRlNdE8")
 ADMIN_IDS     = [5057489358, 1968142314]
 OWNER_CONTACT = "@theplayerror"
 
@@ -411,7 +411,7 @@ BANNER_SEARCH = (
     "╚═══════════════════════╝"
 )
 
-# ================== 🛡️ SAFE SENDERS (WITH FLOOD CONTROL FIX) ==================
+# ================== 🛡️ SAFE SENDERS ==================
 async def safe_reply(update: Update, text: str, reply_markup=None):
     msg = update.effective_message
     if not msg: return None
@@ -494,16 +494,20 @@ def start_webserver():
     import logging as lg; lg.getLogger('werkzeug').setLevel(lg.ERROR)
     web_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
 
-# ================== 🔒 DUAL FORCE JOIN ==================
+# ================== 🔒 FAST DUAL FORCE JOIN ==================
 async def check_joined(context, uid):
     if is_admin(uid): return True
     try:
-        m1 = await context.bot.get_chat_member(FORCE_JOIN_CHANNEL_1_ID, uid)
-        if m1.status not in ["member","administrator","creator","restricted"]: return False
-        m2 = await context.bot.get_chat_member(FORCE_JOIN_CHANNEL_2_ID, uid)
-        return m2.status in ["member","administrator","creator","restricted"]
+        # 3 seconds max timeout to avoid freezing
+        async def _check():
+            m1 = await context.bot.get_chat_member(FORCE_JOIN_CHANNEL_1_ID, uid)
+            if m1.status not in ["member","administrator","creator","restricted"]: return False
+            m2 = await context.bot.get_chat_member(FORCE_JOIN_CHANNEL_2_ID, uid)
+            return m2.status in ["member","administrator","creator","restricted"]
+        return await asyncio.wait_for(_check(), timeout=3.5)
     except Exception as e:
-        logger.warning(f"Join check (User {uid}): {e}"); return True
+        logger.warning(f"Join check fast-bypass for User {uid}: {e}")
+        return True
 
 def force_join_kb():
     return InlineKeyboardMarkup([
@@ -870,7 +874,8 @@ def main_kb(uid):
         [InlineKeyboardButton("🆔 TG ID→Info", callback_data="mode_tgid")],
         [InlineKeyboardButton("🎟️ Redeem", callback_data="redeem_info"), InlineKeyboardButton("👤 Profile", callback_data="profile")],
         [InlineKeyboardButton("📊 Status", callback_data="status"), InlineKeyboardButton("💎 Premium", callback_data="buy")],
-        [InlineKeyboardButton("📢 CH1", url=f"https://t.me/{FORCE_JOIN_CHANNEL_1.replace('@','')}"), InlineKeyboardButton("📢 CH2", url=f"https://t.me/{FORCE_JOIN_CHANNEL_2.replace('@','')}")],
+        [InlineKeyboardButton("📢 CH1", url=f"https://t.me/{FORCE_JOIN_CHANNEL_1.replace('@','')}")],
+        [InlineKeyboardButton("📢 CH2", url=f"https://t.me/{FORCE_JOIN_CHANNEL_2.replace('@','')}")],
         [InlineKeyboardButton("❓ Help ❓", callback_data="help")]
     ])
 
@@ -947,18 +952,24 @@ def plan_kb(pf):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if not user: return ConversationHandler.END
+    
+    print(f"\n⚡ [START COMMAND TRIGGERED] User: {user.id} (@{user.username or 'N/A'})\n")
     logger.info(f"🚀 /start triggered by User {user.id} (@{user.username or 'N/A'})")
+    
     if is_full_maintenance() and not is_admin(user.id):
         if update.callback_query: await safe_edit(update.callback_query, MAINTENANCE_MSG_FULL, back_kb())
         else: await safe_reply(update, MAINTENANCE_MSG_FULL)
         return ConversationHandler.END
+        
     get_user(user.id); u_name = safe_name(user)
+    
     if not is_admin(user.id):
         if not await check_joined(context, user.id):
             t = f"<code>{BANNER}</code>\n\n🔴 <b>Force Join Required</b>\n\nWelcome <b>{u_name}</b>!\n\n📢 {FORCE_JOIN_CHANNEL_1}\n📢 {FORCE_JOIN_CHANNEL_2}\n\nVerify 👇"
             if update.callback_query: await safe_edit(update.callback_query, t, force_join_kb())
             else: await safe_reply(update, t, force_join_kb())
             return ConversationHandler.END
+            
     if is_admin(user.id):
         maint_note = "\n🔧 <b>MAINTENANCE: ON</b>\n" if is_full_maintenance() else ""
         prot_count = len(PROTECTED_ENTRIES)
@@ -979,6 +990,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 except Exception: lines.append(f"⚪ {feat.title()}: <code>Unknown</code>")
             else: lines.append(f"🆓 {feat.title()}: <code>{fl}/{FREE_LIMIT}</code>")
         t = f"<code>{BANNER}</code>\n\n👋 <b>{u_name}</b>!\n\n" + "\n".join(lines) + f"\n\n💡 <b>1 Plan = 15+ tools!</b>\n🎟️ <code>/redeem CODE</code>\n\n👇 <b>Select:</b>"
+        
     if update.callback_query: await safe_edit(update.callback_query, t, main_kb(user.id))
     else: await safe_reply(update, t, main_kb(user.id))
     return ConversationHandler.END
@@ -1032,7 +1044,6 @@ async def execute_search(update, context, feat_name, action, param_key, search_v
 
     msg = await safe_reply(update, "⏳ <i>Initializing...</i>")
     
-    # ── DYNAMIC ROUTING ENGINE ──
     if feat_name == "tgid":
         api_task = asyncio.get_event_loop().run_in_executor(None, lambda: tgid_api_call(search_value))
     elif feat_name == "phone":
@@ -1045,7 +1056,6 @@ async def execute_search(update, context, feat_name, action, param_key, search_v
     anim_task = animated_search(msg, icon, display_value)
     res, _ = await asyncio.gather(api_task, anim_task)
     
-    # ── DYNAMIC BACKUP ENGINE ROUTER ──
     if not res["ok"] and feat_name == "phone":
         res = await asyncio.get_event_loop().run_in_executor(None, lambda: active_phone_api_call(search_value))
         if not res["ok"]:
@@ -1760,17 +1770,16 @@ async def error_handler(update, context):
 async def global_incoming_tracker(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user:
         text = update.message.text if update.message else ("Callback: " + update.callback_query.data if update.callback_query else "Other")
-        logger.info(f"📩 [Incoming] From {update.effective_user.id} (@{update.effective_user.username or 'N/A'}): {text}")
+        print(f"📩 [INCOMING RAW UPDATE] From {update.effective_user.id}: {text}")
 
 # 🤖 Post Init Hook: Deletes old webhooks and logs bot details
 async def post_init(application):
     try:
-        await application.bot.delete_webhook(drop_pending_updates=True)
+        await application.bot.delete_webhook(drop_pending_updates=False)
         bot_info = await application.bot.get_me()
-        logger.info(f"🤖 Connected Successfully as @{bot_info.username} (ID: {bot_info.id})")
         print(f"\n=======================================================")
-        print(f"🤖 BOT IS LIVE: @{bot_info.username}")
-        print(f"👉 SEND /start TO: @{bot_info.username}")
+        print(f"🤖 BOT IS READY: @{bot_info.username}")
+        print(f"👉 CLICK TO START: https://t.me/{bot_info.username}")
         print(f"=======================================================\n")
     except Exception as e:
         logger.error(f"Error in post_init: {e}")
@@ -1801,7 +1810,7 @@ def main():
     load_settings()
     load_protected_entries()
 
-    # Incoming request tracker (runs before any handler)
+    # Track incoming updates
     app.add_handler(TypeHandler(Update, global_incoming_tracker), group=-1)
 
     convs = [
@@ -1878,7 +1887,7 @@ def main():
     print("╔══════════════════════════════════════════════════════╗")
     print("║  ☠️ ZERO TRACE + TGID + PROTECTION SYSTEM RUNNING ☠️  ║")
     print("╚══════════════════════════════════════════════════════╝")
-    app.run_polling(drop_pending_updates=True, allowed_updates=Update.ALL_TYPES)
+    app.run_polling(drop_pending_updates=False, allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
     main()
