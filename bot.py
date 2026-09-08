@@ -6,7 +6,7 @@ Backup Engine: Old Individual API Endpoints
 Active Phone OSINT Engine: Cloudflare Storage Tunnel API (Config Switchable)
 Dual Force Join + Blood ASCII Banner + Animated Loader + Redeem Code + MongoDB Cloud
 + PERSISTENT DATABASE-BACKED MAINTENANCE + ACTIVITY LOGS + 24/7 Keep Alive + AUTO-LOG CLEANUP (3 DAYS)
-+ TG ID TO INFO FEATURE + PROTECTED IDS/NUMBERS SYSTEM + AUTO ADMIN STARTUP PING
++ TG ID TO INFO FEATURE + PROTECTED IDS/NUMBERS SYSTEM + HTTPX TIMEOUT FIX
 """
 
 import json, os, threading, requests, logging, asyncio, re, time, html, secrets, sys
@@ -21,6 +21,7 @@ from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler,
     MessageHandler, ConversationHandler, ContextTypes, filters, TypeHandler
 )
+from telegram.request import HTTPXRequest
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -502,7 +503,7 @@ async def check_joined(context, uid):
             if m1.status not in ["member","administrator","creator","restricted"]: return False
             m2 = await context.bot.get_chat_member(FORCE_JOIN_CHANNEL_2_ID, uid)
             return m2.status in ["member","administrator","creator","restricted"]
-        return await asyncio.wait_for(_check(), timeout=2.0)
+        return await asyncio.wait_for(_check(), timeout=2.5)
     except Exception as e:
         return True
 
@@ -1763,24 +1764,29 @@ async def general_fallback_handler(update: Update, context: ContextTypes.DEFAULT
     if update.message and update.message.text:
         await start(update, context)
 
-# 🤖 Post Init Hook: Sends instant message to Admin inbox on startup
-async def post_init(application):
+# Direct Admin Ping via requests in background thread (Never times out)
+def notify_admin_startup():
+    time.sleep(2)
     for admin_id in ADMIN_IDS:
         try:
-            await application.bot.send_message(
-                chat_id=admin_id,
-                text="🚀 <b>ZERO TRACE Bot is ONLINE!</b>\n\nTap /start to test.",
-                parse_mode="HTML"
+            requests.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                json={
+                    "chat_id": admin_id,
+                    "text": "🚀 <b>ZERO TRACE Bot is ONLINE & READY!</b>\n\n👉 Tap /start to open menu.",
+                    "parse_mode": "HTML"
+                },
+                timeout=15
             )
-            print(f"✅ Startup ping sent directly to Admin {admin_id} in Telegram!", flush=True)
+            print(f"✅ Startup ping delivered directly to Admin {admin_id} in Telegram!", flush=True)
         except Exception as e:
-            print(f"⚠️ Note: Could not send startup ping to {admin_id} ({e})", flush=True)
+            print(f"⚠️ Note: Startup ping error: {e}", flush=True)
 
 # ================== 🏁 MAIN ==================
 def main():
     try:
-        requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook?drop_pending_updates=true", timeout=8)
-        bot_data = requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/getMe", timeout=8).json()
+        requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook?drop_pending_updates=false", timeout=15)
+        bot_data = requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/getMe", timeout=15).json()
         if bot_data.get("ok"):
             b_user = bot_data["result"]["username"]
             print("\n" + "="*50, flush=True)
@@ -1796,10 +1802,17 @@ def main():
     threading.Thread(target=cleanup_old_logs_loop, daemon=True).start()
     print("🧹 Logs Auto-Cleanup Engine Started!", flush=True)
 
+    threading.Thread(target=notify_admin_startup, daemon=True).start()
+
+    # Configure robust HTTP request timeouts to prevent network drop
+    req = HTTPXRequest(connect_timeout=20.0, read_timeout=35.0, write_timeout=20.0, pool_timeout=20.0)
+    get_updates_req = HTTPXRequest(connect_timeout=20.0, read_timeout=35.0, write_timeout=20.0, pool_timeout=20.0)
+
     app = (
         ApplicationBuilder()
         .token(BOT_TOKEN)
-        .post_init(post_init)
+        .request(req)
+        .get_updates_request(get_updates_req)
         .build()
     )
 
