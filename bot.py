@@ -6,7 +6,7 @@ Backup Engine: Old Individual API Endpoints
 Active Phone OSINT Engine: Cloudflare Storage Tunnel API (Config Switchable)
 Dual Force Join + Blood ASCII Banner + Animated Loader + Redeem Code + MongoDB Cloud
 + PERSISTENT DATABASE-BACKED MAINTENANCE + ACTIVITY LOGS + 24/7 Keep Alive + AUTO-LOG CLEANUP (3 DAYS)
-+ TG ID TO INFO FEATURE + PROTECTED IDS/NUMBERS SYSTEM
++ TG ID TO INFO FEATURE + PROTECTED IDS/NUMBERS SYSTEM + FLOODWAIT / RATE LIMIT FIX
 """
 
 import json, os, threading, requests, logging, asyncio, re, time, html, secrets
@@ -16,6 +16,7 @@ from collections import deque
 from flask import Flask
 from pymongo import MongoClient
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.error import RetryAfter, BadRequest, TelegramError
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler,
     MessageHandler, ConversationHandler, ContextTypes, filters
@@ -36,18 +37,18 @@ OWNER_CONTACT = "@theplayerror"
 PRIMARY_API_URL = "https://api-src.alonepatel.shop/api"
 PRIMARY_API_KEY = "INDIAN_HACKER_BRO"
 
-# ── TG ID to Info API (NEW) ──
+# ── TG ID to Info API ──
 TGID_API_URL = "https://api-src.alonepatel.shop/api"
 TGID_API_KEY = "Tgid_num"
 
 # ── Dynamic Phone Search Engine Selector ──
 PHONE_ENGINE_ACTIVE = "primary"
 
-# ── Active Phone OSINT API (Cloudflare) - Used as Backup Now ──
+# ── Active Phone OSINT API (Cloudflare) ──
 ACTIVE_PHONE_API_URL = "https://storage-deutschland-don-patterns.trycloudflare.com/num"
 ACTIVE_PHONE_API_KEY = "DADDY"
 
-# ── Old APIs Kept as Backup (Easily switchable) ──
+# ── Old APIs Kept as Backup ──
 BACKUP_PIN             = "happyrb"
 BACKUP_SEARCH_API_URL  = "https://num-info-hiteck.asurpapa.workers.dev/"
 BACKUP_PHONE_API_URL   = "https://num-info-hiteck.asurpapa.workers.dev/api"
@@ -83,15 +84,9 @@ PLANS = {
 }
 
 # ================== 🛡️ PROTECTED IDS/NUMBERS SYSTEM ==================
-"""
-Protected system blocks ANY search on protected TG IDs, phone numbers, or any identifier.
-Admin can add/remove protected entries via /admin panel.
-If anyone searches a protected number/ID, they get a blocked message.
-"""
-PROTECTED_ENTRIES = set()  # In-memory cache: set of strings (phone numbers, TG IDs, etc.)
+PROTECTED_ENTRIES = set()
 
 def load_protected_entries():
-    """Load protected entries from MongoDB and local file."""
     global PROTECTED_ENTRIES
     if db is not None:
         try:
@@ -113,10 +108,8 @@ def load_protected_entries():
             logger.warning(f"Protected entries local load error: {e}")
 
 def save_protected_entry(entry):
-    """Add a protected entry to DB and cache."""
     entry = str(entry).strip()
     PROTECTED_ENTRIES.add(entry)
-    
     def _save():
         if db is not None:
             try:
@@ -128,7 +121,6 @@ def save_protected_entry(entry):
                 )
             except Exception as e:
                 logger.error(f"Protected entry DB save error: {e}")
-        # Also save locally as backup
         try:
             prot_file = Path("protected_entries.json")
             prot_file.write_text(json.dumps(list(PROTECTED_ENTRIES), indent=2))
@@ -137,10 +129,8 @@ def save_protected_entry(entry):
     threading.Thread(target=_save, daemon=True).start()
 
 def remove_protected_entry(entry):
-    """Remove a protected entry from DB and cache."""
     entry = str(entry).strip()
     PROTECTED_ENTRIES.discard(entry)
-    
     def _remove():
         if db is not None:
             try:
@@ -156,25 +146,20 @@ def remove_protected_entry(entry):
     threading.Thread(target=_remove, daemon=True).start()
 
 def is_protected(search_value):
-    """Check if a search value matches any protected entry."""
     sv = str(search_value).strip()
-    # Direct match
     if sv in PROTECTED_ENTRIES:
         return True
-    # Check without country code prefix (for phone numbers)
     for prefix in ["91", "+91", "0"]:
         if sv.startswith(prefix):
             stripped = sv[len(prefix):]
             if stripped in PROTECTED_ENTRIES:
                 return True
-    # Check if the entry with prefix exists
     if sv.isdigit():
         for entry in PROTECTED_ENTRIES:
             clean_entry = entry.replace("+", "").replace("-", "").replace(" ", "")
             clean_sv = sv.replace("+", "").replace("-", "").replace(" ", "")
             if clean_entry == clean_sv:
                 return True
-            # Match last 10 digits (Indian phone numbers)
             if len(clean_entry) >= 10 and len(clean_sv) >= 10:
                 if clean_entry[-10:] == clean_sv[-10:]:
                     return True
@@ -206,7 +191,7 @@ FEATURE_EXAMPLES = {
     "paytm":    "💰 <b>Example:</b> <code>9876543210</code>",
     "ip":       "🌐 <b>Example:</b> <code>8.8.8.8</code> or <code>142.250.191.14</code>",
     "weather":  "🌤️ <b>Example:</b> <code>Mumbai</code>, <code>Delhi</code>, <code>London</code>",
-    "tgid":     "🆔 <b>Example:</b> <code>8771611214</code> (Telegram User ID → Phone/Info)",
+    "tgid":     "🆔 <b>Example:</b> <code>8771611214</code> (Telegram User ID → Info)",
 }
 
 # ================== 📋 ACTIVITY LOGS SYSTEM ==================
@@ -238,7 +223,6 @@ def add_activity_log(user_id, username, first_name, feat_name, search_term, stat
     except Exception:
         pass
 
-# 🧹 3 Days Automatic Activity Logs Cleanup Loop
 def cleanup_old_logs_loop():
     while True:
         try:
@@ -264,19 +248,17 @@ def get_recent_logs(count=20):
     return logs[-count:] if len(logs) > count else logs
 
 def get_user_logs(user_id, count=10):
-    user_logs = [l for l in ACTIVITY_LOGS if l["user_id"] == user_id]
-    return user_logs[-count:]
+    return [l for l in ACTIVITY_LOGS if l["user_id"] == user_id][-count:]
 
 def get_feature_logs(feat_name, count=15):
-    feat_logs = [l for l in ACTIVITY_LOGS if l["feature"] == feat_name]
-    return feat_logs[-count:]
+    return [l for l in ACTIVITY_LOGS if l["feature"] == feat_name][-count:]
 
 def format_logs_text(logs, title="📋 ACTIVITY LOGS"):
     if not logs:
         return f"<code>{BANNER_MINI}</code>\n\n{title}\n\n📭 <i>No activity logs yet.</i>"
     txt = f"<code>{BANNER_MINI}</code>\n\n<b>{title}</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
     for log in reversed(logs):
-        status_icon = "✅" if log["status"] == "success" else "❌"
+        status_icon = "✅" if log["status"] == "success" else ("🛡️" if "protected" in log["status"] else "❌")
         uname = f"@{log['username']}" if log['username'] != "N/A" else log['first_name']
         txt += (
             f"{status_icon} <b>{log['time_short']}</b> | "
@@ -393,7 +375,7 @@ COUNTRY_SINGLE, COUNTRY_BATCH   = 30, 31
 PAYTM_SINGLE, PAYTM_BATCH       = 32, 33
 IP_SINGLE, IP_BATCH             = 34, 35
 WEATHER_SINGLE, WEATHER_BATCH   = 36, 37
-TGID_SINGLE, TGID_BATCH         = 38, 39  # NEW: TG ID to Info
+TGID_SINGLE, TGID_BATCH         = 38, 39
 ADMIN_ADD_ID, ADMIN_ADD_PLAN    = 50, 51
 ADMIN_REM_ID                    = 52
 ADMIN_EXP_ID, ADMIN_EXP_PLAN    = 53, 54
@@ -406,8 +388,8 @@ REDEEM_CREATE_SEARCHES          = 71
 REDEEM_CREATE_LIMIT             = 72
 REDEEM_DELETE_CODE              = 73
 ADMIN_LOGS_USER_ID              = 80
-ADMIN_PROTECT_ADD               = 90  # NEW: Add protected entry
-ADMIN_PROTECT_REMOVE            = 91  # NEW: Remove protected entry
+ADMIN_PROTECT_ADD               = 90
+ADMIN_PROTECT_REMOVE            = 91
 
 # ================== 🩸 BANNERS ==================
 BANNER = (
@@ -429,49 +411,61 @@ BANNER_SEARCH = (
     "╚═══════════════════════╝"
 )
 
-# ================== 🛡️ SAFE SENDERS ==================
+# ================== 🛡️ SAFE SENDERS (WITH FLOOD CONTROL FIX) ==================
 async def safe_reply(update: Update, text: str, reply_markup=None):
     msg = update.effective_message
     if not msg: return None
     try:
         return await msg.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
+    except RetryAfter as e:
+        logger.warning(f"safe_reply hit RetryAfter: sleeping {e.retry_after}s")
+        await asyncio.sleep(e.retry_after + 0.5)
+        try: return await msg.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
+        except Exception: return None
     except Exception as e:
-        logger.warning(f"safe_reply HTML failed: {e}")
         clean = re.sub(r"</?(?:b|i|code|pre|u|s)>", "", text)
         clean = html.unescape(clean)
         try: return await msg.reply_text(clean[:4096], reply_markup=reply_markup)
         except Exception as e2: logger.error(f"safe_reply fallback: {e2}"); return None
 
 async def safe_edit(target, text: str, reply_markup=None):
-    try:
-        if hasattr(target, "edit_message_text"):
-            return await target.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
-        elif hasattr(target, "edit_text"):
-            return await target.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
-    except Exception as e:
-        logger.warning(f"safe_edit HTML failed: {e}")
-        clean = re.sub(r"</?(?:b|i|code|pre|u|s)>", "", text)
-        clean = html.unescape(clean)
+    if not target: return None
+    for attempt in range(2):
         try:
             if hasattr(target, "edit_message_text"):
-                return await target.edit_message_text(clean[:4096], reply_markup=reply_markup)
+                return await target.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
             elif hasattr(target, "edit_text"):
-                return await target.edit_text(clean[:4096], reply_markup=reply_markup)
-        except Exception as e2: logger.error(f"safe_edit fallback: {e2}"); return None
+                return await target.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
+        except RetryAfter as e:
+            logger.warning(f"safe_edit hit RetryAfter: sleeping {e.retry_after}s")
+            await asyncio.sleep(e.retry_after + 0.5)
+            continue
+        except BadRequest as e:
+            if "Message is not modified" in str(e):
+                return target
+            clean = re.sub(r"</?(?:b|i|code|pre|u|s)>", "", text)
+            clean = html.unescape(clean)
+            try:
+                if hasattr(target, "edit_message_text"):
+                    return await target.edit_message_text(clean[:4096], reply_markup=reply_markup)
+                elif hasattr(target, "edit_text"):
+                    return await target.edit_text(clean[:4096], reply_markup=reply_markup)
+            except Exception:
+                return None
+        except Exception as e:
+            logger.warning(f"safe_edit error: {e}")
+            break
+    return None
 
 def is_admin(uid): return int(uid) in ADMIN_IDS
 def safe_name(user):
-    name = user.first_name or "User"
-    return html.escape(name)
+    return html.escape(user.first_name or "User")
 
-# ================== 🎨 ANIMATED LOADING BAR ==================
+# ================== 🎨 RATE-LIMIT FRIENDLY ANIMATED LOADER ==================
 LOADING_STEPS = [
-    ("🔴", "Initializing Scan...", "░░░░░░░░░░░░░░░░░░░░"),
-    ("🟡", "Scanning Database...", "█████░░░░░░░░░░░░░░░"),
-    ("🔵", "Fetching Records...", "██████████░░░░░░░░░░"),
-    ("🟣", "Decoding Info...", "███████████████░░░░░"),
-    ("🟢", "Finalizing...", "████████████████████"),
-    ("⚡", "Complete!", "████████████████████")
+    ("🟡", "Scanning Database...", "██████░░░░░░░░░░░░░░", 35),
+    ("🟣", "Decoding Records...",  "██████████████░░░░░░", 75),
+    ("🟢", "Finalizing Report...", "████████████████████", 100)
 ]
 
 def build_loading_text(icon, display, step_emoji, step_text, bar, percent):
@@ -486,13 +480,11 @@ def build_loading_text(icon, display, step_emoji, step_text, bar, percent):
 
 async def animated_search(msg, icon, display):
     if not msg: return
-    percents = [10, 30, 55, 75, 95, 100]
-    for i, (se, st, bar) in enumerate(LOADING_STEPS):
-        pct = percents[i] if i < len(percents) else 100
+    for i, (se, st, bar, pct) in enumerate(LOADING_STEPS):
         txt = build_loading_text(icon, display, se, st, bar, pct)
-        try: await msg.edit_text(txt, parse_mode="HTML")
-        except Exception: pass
-        if i < len(LOADING_STEPS) - 1: await asyncio.sleep(0.4)
+        await safe_edit(msg, txt)
+        if i < len(LOADING_STEPS) - 1:
+            await asyncio.sleep(1.2)  # Safe 1.2s delay eliminates 429 errors
 
 # ================== 🌐 FLASK KEEP-ALIVE ==================
 web_app = Flask(__name__)
@@ -730,7 +722,6 @@ def primary_api_call(action, params):
         return {"ok": True, "data": data}
     return _safe_api(c)
 
-# 🆔 TG ID to Info API Call (NEW FEATURE)
 def tgid_api_call(tg_id):
     def c():
         r = requests.get(
@@ -747,7 +738,6 @@ def tgid_api_call(tg_id):
         return {"ok": True, "data": data}
     return _safe_api(c)
 
-# 🚀 Active Phone API Call (Used as Backup/Alternative Dynamic Routing Route)
 def active_phone_api_call(num):
     def c():
         r = requests.get(
@@ -776,7 +766,6 @@ def backup_phone_api(num):
         return {"ok": False, "error": f"HTTP {r.status_code}"} if r.status_code != 200 else {"ok": True, "data": r.json()}
     return _safe_api(c)
 
-# 🏦 Old Backup IFSC API Engine
 def backup_ifsc_api_call(ifsc_code):
     def c():
         r = requests.get(
@@ -926,7 +915,6 @@ def logs_kb():
     ])
 
 def protect_kb():
-    """Protected IDs management keyboard"""
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("➕ Add Protected Entry", callback_data="protect_add")],
         [InlineKeyboardButton("❌ Remove Protected Entry", callback_data="protect_remove")],
@@ -1016,11 +1004,10 @@ async def execute_search(update, context, feat_name, action, param_key, search_v
     if is_feature_maintenance(feat_name):
         await safe_reply(update, maintenance_msg_feature(feat_name), back_kb()); return
     
-    # 🛡️ PROTECTION CHECK - Block search if value is protected
+    # 🛡️ PROTECTION CHECK
     if is_protected(search_value):
         add_activity_log(u.id, u.username, u.first_name, feat_name, display_value, "blocked_protected")
         await safe_reply(update, PROTECTED_BLOCK_MSG, back_kb())
-        # Notify admins about the attempt
         for admin_id in ADMIN_IDS:
             try:
                 await context.bot.send_message(
@@ -1046,7 +1033,6 @@ async def execute_search(update, context, feat_name, action, param_key, search_v
     
     # ── DYNAMIC ROUTING ENGINE ──
     if feat_name == "tgid":
-        # NEW: TG ID to Info - dedicated API
         api_task = asyncio.get_event_loop().run_in_executor(None, lambda: tgid_api_call(search_value))
     elif feat_name == "phone":
         api_task = asyncio.get_event_loop().run_in_executor(None, lambda: primary_api_call(action, {param_key: search_value}))
@@ -1089,17 +1075,14 @@ async def execute_batch(update, context, feat_name, action, param_key, items, ic
 
     msg = await safe_reply(update, f"<code>{BANNER_MINI}</code>\n\n📦 <b>Batch:</b> <b>{total}</b>\n\n<code>[░░░░░░░░░░░░░░░░░░░░]</code> 0%")
     for idx, item in enumerate(items, 1):
-        # 🛡️ PROTECTION CHECK for each batch item
         if is_protected(item):
             add_activity_log(u.id, u.username, u.first_name, feat_name, item, "blocked_protected")
             await safe_reply(update, f"🛡️ <code>{html.escape(str(item))}</code> → <b>PROTECTED</b> (Skipped)")
             continue
         
         pct = int((idx / total) * 100); filled = int(pct / 5); bar = "█" * filled + "░" * (20 - filled)
-        try: await msg.edit_text(f"<code>{BANNER_MINI}</code>\n\n📦 <code>{html.escape(str(item))}</code>\n📊 <b>{idx}/{total}</b>\n\n<code>[{bar}]</code> <b>{pct}%</b>", parse_mode="HTML")
-        except Exception: pass
+        await safe_edit(msg, f"<code>{BANNER_MINI}</code>\n\n📦 <code>{html.escape(str(item))}</code>\n📊 <b>{idx}/{total}</b>\n\n<code>[{bar}]</code> <b>{pct}%</b>")
         
-        # ── Batch Routing ──
         if feat_name == "tgid":
             res = tgid_api_call(item)
         elif feat_name == "phone":
@@ -1120,7 +1103,7 @@ async def execute_batch(update, context, feat_name, action, param_key, items, ic
         else:
             add_activity_log(u.id, u.username, u.first_name, feat_name, item, "failed")
             await safe_reply(update, f"❌ <code>{html.escape(str(item))}</code>: {html.escape(str(res['error']))}")
-        await asyncio.sleep(0.3)
+        await asyncio.sleep(0.8)
     if msg: await safe_edit(msg, f"<code>{BANNER_MINI}</code>\n\n⚡ <b>Done!</b> ✅ <b>{total}</b>\n<code>[████████████████████]</code> <b>100%</b>", main_kb(u.id))
 
 # ================== 📱 MODE PROMPTERS ==================
@@ -1145,7 +1128,7 @@ async def mode_country(u, c): await generic_mode_prompt(u, c, "country", "Countr
 async def mode_paytm(u, c): await generic_mode_prompt(u, c, "paytm", "Paytm Info", "💰")
 async def mode_ip(u, c): await generic_mode_prompt(u, c, "ip", "IP Lookup", "🌐")
 async def mode_weather(u, c): await generic_mode_prompt(u, c, "weather", "Weather", "🌤️")
-async def mode_tgid(u, c): await generic_mode_prompt(u, c, "tgid", "TG ID → Phone/Info", "🆔")  # NEW
+async def mode_tgid(u, c): await generic_mode_prompt(u, c, "tgid", "TG ID → Phone/Info", "🆔")
 
 # ================== 📥 SEARCH HANDLERS ==================
 def make_handler_pair(feat_name, action, param_key, icon, single_state, batch_state, prompt_single, prompt_batch, validator_fn=None):
@@ -1263,7 +1246,6 @@ def clean_tgid(x):
 (pm_ss, pm_bs, pm_sp, pm_bp) = make_handler_pair("paytm","paytm","info","💰",PAYTM_SINGLE,PAYTM_BATCH,"Enter Paytm No:","Numbers (comma-sep):",clean_num)
 (ip_ss, ip_bs, ip_sp, ip_bp) = make_handler_pair("ip","ip-v1","query","🌐",IP_SINGLE,IP_BATCH,"Enter IP:","IPs (comma-sep):",lambda x: x.strip())
 (w_ss, w_bs, w_sp, w_bp) = make_handler_pair("weather","weather","search","🌤️",WEATHER_SINGLE,WEATHER_BATCH,"Enter City:","Cities (comma-sep):",lambda x: x.strip().title())
-# NEW: TG ID → Info
 (tgid_ss, tgid_bs, tgid_sp, tgid_bp) = make_handler_pair("tgid","tgid","id","🆔",TGID_SINGLE,TGID_BATCH,"Enter Telegram ID:","TG IDs (comma-sep):",clean_tgid)
 
 # ================== 👤 PROFILE / STATUS / HELP / BUY ==================
@@ -1352,10 +1334,8 @@ async def admin_back(u, c): await admin_panel(u, c)
 
 # ================== 🛡️ ADMIN PROTECTION HANDLERS ==================
 async def admin_protect_menu(update, context):
-    """Show protection management menu"""
     q = update.callback_query; await q.answer()
     if not is_admin(q.from_user.id): return
-    
     prot_count = len(PROTECTED_ENTRIES)
     txt = (
         f"<code>{BANNER_MINI}</code>\n\n"
@@ -1363,16 +1343,14 @@ async def admin_protect_menu(update, context):
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         f"📊 Total Protected Entries: <code>{prot_count}</code>\n\n"
         f"⚠️ <b>How it works:</b>\n"
-        f"• Add any phone number, TG ID, Aadhaar, UPI, etc.\n"
+        f"• Add phone, TG ID, Aadhaar, UPI, etc.\n"
         f"• <b>ALL features</b> will be blocked for that entry.\n"
-        f"• Admin gets alert when someone tries to search it.\n"
-        f"• Supports multiple entries (comma-separated).\n\n"
+        f"• Admin gets alert when someone searches it.\n\n"
         f"👇 <b>Select action:</b>"
     )
     await safe_edit(q, txt, protect_kb())
 
 async def protect_add_start(update, context):
-    """Start adding protected entries"""
     q = update.callback_query; await q.answer()
     if not is_admin(q.from_user.id): return ConversationHandler.END
     await safe_edit(q, 
@@ -1381,62 +1359,40 @@ async def protect_add_start(update, context):
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         f"Send entries to protect (comma-separated):\n\n"
         f"📌 <b>Examples:</b>\n"
-        f"• Phone: <code>9876543210</code>\n"
-        f"• TG ID: <code>5057489358</code>\n"
-        f"• Aadhaar: <code>123456789012</code>\n"
-        f"• UPI: <code>ram@paytm</code>\n"
-        f"• Multiple: <code>9876543210, 5057489358, ram@paytm</code>\n\n"
+        f"• <code>9876543210</code>, <code>5057489358</code>, <code>ram@paytm</code>\n\n"
         f"✍️ <i>Send entries or /cancel:</i>"
     )
     return ADMIN_PROTECT_ADD
 
 async def protect_add_process(update, context):
-    """Process and add protected entries"""
     raw = update.message.text.strip()
     entries = [x.strip() for x in raw.split(",") if x.strip()]
-    
     if not entries:
         await safe_reply(update, "❌ No valid entries! Try again or /cancel:")
         return ADMIN_PROTECT_ADD
-    
-    added = []
-    already = []
+    added, already = [], []
     for entry in entries:
         clean = entry.replace(" ", "").replace("-", "").replace("+", "") if entry.replace(" ", "").replace("-", "").replace("+", "").isdigit() else entry.strip()
-        if clean in PROTECTED_ENTRIES:
-            already.append(clean)
-        else:
-            save_protected_entry(clean)
-            added.append(clean)
-    
+        if clean in PROTECTED_ENTRIES: already.append(clean)
+        else: save_protected_entry(clean); added.append(clean)
     txt = f"<code>{BANNER_MINI}</code>\n\n🛡️ <b>PROTECTION UPDATE</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
     if added:
-        txt += f"✅ <b>Added ({len(added)}):</b>\n"
-        for a in added:
-            txt += f"  • <code>{html.escape(a)}</code>\n"
+        txt += f"✅ <b>Added ({len(added)}):</b>\n" + "\n".join(f"  • <code>{html.escape(a)}</code>" for a in added) + "\n"
     if already:
-        txt += f"\n⚠️ <b>Already Protected ({len(already)}):</b>\n"
-        for a in already:
-            txt += f"  • <code>{html.escape(a)}</code>\n"
+        txt += f"\n⚠️ <b>Already Protected ({len(already)}):</b>\n" + "\n".join(f"  • <code>{html.escape(a)}</code>" for a in already) + "\n"
     txt += f"\n📊 Total Protected: <code>{len(PROTECTED_ENTRIES)}</code>"
-    
     await safe_reply(update, txt, protect_kb())
     return ConversationHandler.END
 
 async def protect_remove_start(update, context):
-    """Start removing protected entries"""
     q = update.callback_query; await q.answer()
     if not is_admin(q.from_user.id): return ConversationHandler.END
-    
     if not PROTECTED_ENTRIES:
         await safe_edit(q, f"<code>{BANNER_MINI}</code>\n\n📭 No protected entries to remove.", protect_kb())
         return ConversationHandler.END
-    
-    # Show first 30 entries
     entries_list = sorted(list(PROTECTED_ENTRIES))[:30]
     entries_txt = "\n".join(f"  • <code>{html.escape(e)}</code>" for e in entries_list)
     extra = f"\n  ... and {len(PROTECTED_ENTRIES) - 30} more" if len(PROTECTED_ENTRIES) > 30 else ""
-    
     await safe_edit(q, 
         f"<code>{BANNER_MINI}</code>\n\n"
         f"❌ <b>REMOVE PROTECTED ENTRIES</b>\n"
@@ -1447,69 +1403,50 @@ async def protect_remove_start(update, context):
     return ADMIN_PROTECT_REMOVE
 
 async def protect_remove_process(update, context):
-    """Process and remove protected entries"""
     raw = update.message.text.strip()
     entries = [x.strip() for x in raw.split(",") if x.strip()]
-    
     if not entries:
         await safe_reply(update, "❌ No entries provided! Try again or /cancel:")
         return ADMIN_PROTECT_REMOVE
-    
-    removed = []
-    not_found = []
+    removed, not_found = [], []
     for entry in entries:
         clean = entry.replace(" ", "").replace("-", "").replace("+", "") if entry.replace(" ", "").replace("-", "").replace("+", "").isdigit() else entry.strip()
-        if clean in PROTECTED_ENTRIES:
-            remove_protected_entry(clean)
-            removed.append(clean)
-        else:
-            not_found.append(clean)
-    
+        if clean in PROTECTED_ENTRIES: remove_protected_entry(clean); removed.append(clean)
+        else: not_found.append(clean)
     txt = f"<code>{BANNER_MINI}</code>\n\n🛡️ <b>REMOVAL UPDATE</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
     if removed:
-        txt += f"✅ <b>Removed ({len(removed)}):</b>\n"
-        for r in removed:
-            txt += f"  • <code>{html.escape(r)}</code>\n"
+        txt += f"✅ <b>Removed ({len(removed)}):</b>\n" + "\n".join(f"  • <code>{html.escape(r)}</code>" for r in removed) + "\n"
     if not_found:
-        txt += f"\n❌ <b>Not Found ({len(not_found)}):</b>\n"
-        for n in not_found:
-            txt += f"  • <code>{html.escape(n)}</code>\n"
+        txt += f"\n❌ <b>Not Found ({len(not_found)}):</b>\n" + "\n".join(f"  • <code>{html.escape(n)}</code>" for n in not_found) + "\n"
     txt += f"\n📊 Remaining Protected: <code>{len(PROTECTED_ENTRIES)}</code>"
-    
     await safe_reply(update, txt, protect_kb())
     return ConversationHandler.END
 
 async def protect_list(update, context):
-    """List all protected entries"""
     q = update.callback_query; await q.answer()
     if not is_admin(q.from_user.id): return
-    
     if not PROTECTED_ENTRIES:
         await safe_edit(q, f"<code>{BANNER_MINI}</code>\n\n📭 <b>No protected entries.</b>\n\nAdd some via ➕ button!", protect_kb())
         return
-    
     entries_list = sorted(list(PROTECTED_ENTRIES))
     txt = f"<code>{BANNER_MINI}</code>\n\n🛡️ <b>ALL PROTECTED ENTRIES ({len(entries_list)})</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-    
     for idx, entry in enumerate(entries_list, 1):
         line = f"{idx}. <code>{html.escape(entry)}</code>\n"
         if len(txt) + len(line) > 3900:
             txt += f"\n⚠️ <i>...and {len(entries_list) - idx + 1} more (truncated)</i>"
             break
         txt += line
-    
     await safe_edit(q, txt, protect_kb())
 
 # ================== 📋 ADMIN LOGS HANDLERS ==================
 async def admin_logs_menu(update, context):
     q = update.callback_query; await q.answer()
     if not is_admin(q.from_user.id): return
-    total_logs = len(ACTIVITY_LOGS)
     txt = (
         f"<code>{BANNER_MINI}</code>\n\n"
         f"📋 <b>ACTIVITY LOGS CENTER</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"📊 Total Logs Stored: <code>{total_logs}</code>\n"
+        f"📊 Total Logs Stored: <code>{len(ACTIVITY_LOGS)}</code>\n"
         f"💾 Max Capacity: <code>200 (Auto-cleans &gt; 3 days)</code>\n\n"
         f"👇 <b>Select log view:</b>"
     )
@@ -1741,8 +1678,8 @@ async def bc_confirm(u, c):
             if any(w in str(e).lower() for w in ["blocked","forbidden","not found"]): b += 1
             else: f2 += 1
         if ct % 15 == 0 or ct == total:
-            try: await sm.edit_text(f"🚀 <code>{ct}/{total}</code>|✅<code>{s}</code>|🚫<code>{b}</code>|❌<code>{f2}</code>", parse_mode="HTML")
-            except Exception: pass
+            await safe_edit(sm, f"🚀 <code>{ct}/{total}</code>|✅<code>{s}</code>|🚫<code>{b}</code>|❌<code>{f2}</code>")
+        await asyncio.sleep(0.05)
     await safe_reply(u, f"✅ <b>Done!</b> 👥<code>{total}</code>|✅<code>{s}</code>|🚫<code>{b}</code>|❌<code>{f2}</code>", admin_kb())
     c.user_data.pop("bc",None); return ConversationHandler.END
 
@@ -1813,6 +1750,9 @@ async def admin_redeem_delete_input(update, context):
     return ConversationHandler.END
 
 async def error_handler(update, context):
+    if isinstance(context.error, RetryAfter):
+        logger.warning(f"Telegram Rate-limit hit globally: retry in {context.error.retry_after}s")
+        return
     logger.error(f"❌ {context.error}")
 
 # ================== 🏁 MAIN ==================
@@ -1830,9 +1770,7 @@ def main():
     C = ConversationHandler; CQ = CallbackQueryHandler; MH = MessageHandler; CMD = CommandHandler
     F = filters.TEXT & ~filters.COMMAND; UF = [CMD("cancel", cancel), CMD("start", start)]
 
-    # Load persistent settings at startup
     load_settings()
-    # Load protected entries at startup
     load_protected_entries()
 
     convs = [
@@ -1864,7 +1802,6 @@ def main():
         C(entry_points=[CQ(ip_bs,pattern="^ip_batch$")],states={IP_BATCH:[MH(F,ip_bp)]},fallbacks=UF,per_message=False,allow_reentry=True),
         C(entry_points=[CQ(w_ss,pattern="^weather_single$")],states={WEATHER_SINGLE:[MH(F,w_sp)]},fallbacks=UF,per_message=False,allow_reentry=True),
         C(entry_points=[CQ(w_bs,pattern="^weather_batch$")],states={WEATHER_BATCH:[MH(F,w_bp)]},fallbacks=UF,per_message=False,allow_reentry=True),
-        # NEW: TG ID → Info conversations
         C(entry_points=[CQ(tgid_ss,pattern="^tgid_single$")],states={TGID_SINGLE:[MH(F,tgid_sp)]},fallbacks=UF,per_message=False,allow_reentry=True),
         C(entry_points=[CQ(tgid_bs,pattern="^tgid_batch$")],states={TGID_BATCH:[MH(F,tgid_bp)]},fallbacks=UF,per_message=False,allow_reentry=True),
         # Admin conversations
@@ -1874,9 +1811,7 @@ def main():
         C(entry_points=[CQ(bc_start,pattern="^admin_broadcast$")],states={ADMIN_BROADCAST_MSG:[MH(F,bc_msg)],ADMIN_BROADCAST_CONFIRM:[CQ(bc_confirm,pattern="^broadcast_(confirm|cancel)$")]},fallbacks=UF,per_message=False,allow_reentry=True),
         C(entry_points=[CQ(admin_redeem_create_start,pattern="^admin_redeem_create$")],states={REDEEM_CREATE_CODE:[MH(F,admin_redeem_code_input)],REDEEM_CREATE_SEARCHES:[MH(F,admin_redeem_searches_input)],REDEEM_CREATE_LIMIT:[MH(F,admin_redeem_limit_input)]},fallbacks=UF,per_message=False,allow_reentry=True),
         C(entry_points=[CQ(admin_redeem_delete_start,pattern="^admin_redeem_delete$")],states={REDEEM_DELETE_CODE:[MH(F,admin_redeem_delete_input)]},fallbacks=UF,per_message=False,allow_reentry=True),
-        # Logs by user conversation
         C(entry_points=[CQ(logs_by_user_start,pattern="^logs_by_user$")],states={ADMIN_LOGS_USER_ID:[MH(F,logs_by_user_process)]},fallbacks=UF,per_message=False,allow_reentry=True),
-        # NEW: Protection management conversations
         C(entry_points=[CQ(protect_add_start,pattern="^protect_add$")],states={ADMIN_PROTECT_ADD:[MH(F,protect_add_process)]},fallbacks=UF,per_message=False,allow_reentry=True),
         C(entry_points=[CQ(protect_remove_start,pattern="^protect_remove$")],states={ADMIN_PROTECT_REMOVE:[MH(F,protect_remove_process)]},fallbacks=UF,per_message=False,allow_reentry=True),
     ]
@@ -1904,7 +1839,6 @@ def main():
     for pattern, fn in callbacks:
         app.add_handler(CQ(fn, pattern=f"^{pattern}$"))
     
-    # Regex handlers
     app.add_handler(CQ(maint_toggle_handler, pattern=r"^maint_toggle_"))
     app.add_handler(CQ(logs_by_feature, pattern=r"^logs_feat_"))
 
