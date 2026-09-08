@@ -6,7 +6,7 @@ Backup Engine: Old Individual API Endpoints
 Active Phone OSINT Engine: Cloudflare Storage Tunnel API (Config Switchable)
 Dual Force Join + Blood ASCII Banner + Animated Loader + Redeem Code + MongoDB Cloud
 + PERSISTENT DATABASE-BACKED MAINTENANCE + ACTIVITY LOGS + 24/7 Keep Alive + AUTO-LOG CLEANUP (3 DAYS)
-+ TG ID TO INFO FEATURE + PROTECTED IDS/NUMBERS SYSTEM + BULLETPROOF RESPONSE FIX
++ TG ID TO INFO FEATURE + PROTECTED IDS/NUMBERS SYSTEM + AUTO ADMIN STARTUP PING
 """
 
 import json, os, threading, requests, logging, asyncio, re, time, html, secrets, sys
@@ -935,9 +935,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if not user: return ConversationHandler.END
     
-    print(f"\n=======================================================", flush=True)
-    print(f"⚡ [RECEIVED /start] From User: {user.id} (@{user.username or 'N/A'})", flush=True)
-    print(f"=======================================================\n", flush=True)
+    print(f"⚡ [START TRIGGERED] User: {user.id} (@{user.username or 'N/A'})", flush=True)
     
     try:
         if is_full_maintenance() and not is_admin(user.id):
@@ -1765,6 +1763,19 @@ async def general_fallback_handler(update: Update, context: ContextTypes.DEFAULT
     if update.message and update.message.text:
         await start(update, context)
 
+# 🤖 Post Init Hook: Sends instant message to Admin inbox on startup
+async def post_init(application):
+    for admin_id in ADMIN_IDS:
+        try:
+            await application.bot.send_message(
+                chat_id=admin_id,
+                text="🚀 <b>ZERO TRACE Bot is ONLINE!</b>\n\nTap /start to test.",
+                parse_mode="HTML"
+            )
+            print(f"✅ Startup ping sent directly to Admin {admin_id} in Telegram!", flush=True)
+        except Exception as e:
+            print(f"⚠️ Note: Could not send startup ping to {admin_id} ({e})", flush=True)
+
 # ================== 🏁 MAIN ==================
 def main():
     try:
@@ -1785,7 +1796,12 @@ def main():
     threading.Thread(target=cleanup_old_logs_loop, daemon=True).start()
     print("🧹 Logs Auto-Cleanup Engine Started!", flush=True)
 
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app = (
+        ApplicationBuilder()
+        .token(BOT_TOKEN)
+        .post_init(post_init)
+        .build()
+    )
 
     C = ConversationHandler; CQ = CallbackQueryHandler; MH = MessageHandler; CMD = CommandHandler
     F = filters.TEXT & ~filters.COMMAND; UF = [CMD("cancel", cancel), CMD("start", start)]
