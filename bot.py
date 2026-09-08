@@ -6,10 +6,10 @@ Backup Engine: Old Individual API Endpoints
 Active Phone OSINT Engine: Cloudflare Storage Tunnel API (Config Switchable)
 Dual Force Join + Blood ASCII Banner + Animated Loader + Redeem Code + MongoDB Cloud
 + PERSISTENT DATABASE-BACKED MAINTENANCE + ACTIVITY LOGS + 24/7 Keep Alive + AUTO-LOG CLEANUP (3 DAYS)
-+ TG ID TO INFO FEATURE + PROTECTED IDS/NUMBERS SYSTEM + FLOODWAIT FIX + INSTANT RESPONSE FIX
++ TG ID TO INFO FEATURE + PROTECTED IDS/NUMBERS SYSTEM + BULLETPROOF RESPONSE FIX
 """
 
-import json, os, threading, requests, logging, asyncio, re, time, html, secrets
+import json, os, threading, requests, logging, asyncio, re, time, html, secrets, sys
 from datetime import date, timedelta, datetime, timezone
 from pathlib import Path
 from collections import deque
@@ -30,7 +30,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ================== ⚙️ CONFIG ==================
-BOT_TOKEN     = os.environ.get("BOT_TOKEN", "8642873626:AAG84pEyNRjx6VYilnGlIpNEILD_ZRlNdE8")
+# Direct token prioritize taaki Render ka purana cached Env Var issue na kare
+BOT_TOKEN     = "8642873626:AAG84pEyNRjx6VYilnGlIpNEILD_ZRlNdE8"
 ADMIN_IDS     = [5057489358, 1968142314]
 OWNER_CONTACT = "@theplayerror"
 
@@ -93,7 +94,7 @@ def load_protected_entries():
             prot_col = db["protected_entries"]
             for doc in prot_col.find():
                 PROTECTED_ENTRIES.add(str(doc["_id"]).strip())
-            print(f"🛡️ Loaded {len(PROTECTED_ENTRIES)} protected entries from MongoDB.")
+            print(f"🛡️ Loaded {len(PROTECTED_ENTRIES)} protected entries from MongoDB.", flush=True)
             return
         except Exception as e:
             logger.warning(f"Protected entries DB load error: {e}")
@@ -103,7 +104,7 @@ def load_protected_entries():
         try:
             data = json.loads(prot_file.read_text())
             PROTECTED_ENTRIES = set(str(x).strip() for x in data)
-            print(f"🛡️ Loaded {len(PROTECTED_ENTRIES)} protected entries from local file.")
+            print(f"🛡️ Loaded {len(PROTECTED_ENTRIES)} protected entries from local file.", flush=True)
         except Exception as e:
             logger.warning(f"Protected entries local load error: {e}")
 
@@ -292,7 +293,7 @@ def load_settings():
                 feat_maint = doc.get("feature_maintenance", {})
                 for feat in ALL_FEATURE_KEYS:
                     SETTINGS_CACHE["feature_maintenance"][feat] = feat_maint.get(feat, False)
-                print("✅ Global Settings loaded from MongoDB!")
+                print("✅ Global Settings loaded from MongoDB!", flush=True)
                 return
         except Exception as e:
             logger.warning(f"DB Settings Load Error: {e}")
@@ -304,7 +305,7 @@ def load_settings():
             feat_maint = data.get("feature_maintenance", {})
             for feat in ALL_FEATURE_KEYS:
                 SETTINGS_CACHE["feature_maintenance"][feat] = feat_maint.get(feat, False)
-            print("💾 Global Settings loaded from Local JSON Backup!")
+            print("💾 Global Settings loaded from Local JSON Backup!", flush=True)
         except Exception as e:
             logger.warning(f"Local Settings Load Error: {e}")
 
@@ -418,7 +419,7 @@ async def safe_reply(update: Update, text: str, reply_markup=None):
     try:
         return await msg.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
     except RetryAfter as e:
-        logger.warning(f"safe_reply hit RetryAfter: sleeping {e.retry_after}s")
+        logger.warning(f"safe_reply RetryAfter: sleeping {e.retry_after}s")
         await asyncio.sleep(e.retry_after + 0.5)
         try: return await msg.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
         except Exception: return None
@@ -426,7 +427,7 @@ async def safe_reply(update: Update, text: str, reply_markup=None):
         clean = re.sub(r"</?(?:b|i|code|pre|u|s)>", "", text)
         clean = html.unescape(clean)
         try: return await msg.reply_text(clean[:4096], reply_markup=reply_markup)
-        except Exception as e2: logger.error(f"safe_reply fallback: {e2}"); return None
+        except Exception as e2: logger.error(f"safe_reply fallback error: {e2}"); return None
 
 async def safe_edit(target, text: str, reply_markup=None):
     if not target: return None
@@ -437,7 +438,7 @@ async def safe_edit(target, text: str, reply_markup=None):
             elif hasattr(target, "edit_text"):
                 return await target.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
         except RetryAfter as e:
-            logger.warning(f"safe_edit hit RetryAfter: sleeping {e.retry_after}s")
+            logger.warning(f"safe_edit RetryAfter: sleeping {e.retry_after}s")
             await asyncio.sleep(e.retry_after + 0.5)
             continue
         except BadRequest as e:
@@ -498,13 +499,12 @@ def start_webserver():
 async def check_joined(context, uid):
     if is_admin(uid): return True
     try:
-        # 3 seconds max timeout to avoid freezing
         async def _check():
             m1 = await context.bot.get_chat_member(FORCE_JOIN_CHANNEL_1_ID, uid)
             if m1.status not in ["member","administrator","creator","restricted"]: return False
             m2 = await context.bot.get_chat_member(FORCE_JOIN_CHANNEL_2_ID, uid)
             return m2.status in ["member","administrator","creator","restricted"]
-        return await asyncio.wait_for(_check(), timeout=3.5)
+        return await asyncio.wait_for(_check(), timeout=2.5)
     except Exception as e:
         logger.warning(f"Join check fast-bypass for User {uid}: {e}")
         return True
@@ -523,9 +523,11 @@ LOCAL_FILE = Path("users.json"); REDEEM_FILE = Path("redeem_codes.json")
 try:
     mc = MongoClient(MONGO_URI, serverSelectionTimeoutMS=2500)
     db = mc["tele_intel_bot"]; users_col = db["users"]; redeem_col = db["redeem_codes"]
-    mc.admin.command('ping'); print("✅ MongoDB Connected!")
+    mc.admin.command('ping')
+    print("✅ MongoDB Connected Successfully!", flush=True)
 except Exception as e:
-    print("⚠️ MongoDB:", e); users_col = None; redeem_col = None; db = None
+    print(f"⚠️ MongoDB Connection Notice: {e}", flush=True)
+    users_col = None; redeem_col = None; db = None
 
 DEFAULTS = {"plan": "trial", "expiry": "", "is_premium": False, "total_searches": 0, "redeemed_codes": []}
 for feat in ALL_FEATURE_KEYS:
@@ -558,9 +560,9 @@ def init_cache():
             for log in reversed(loaded_logs):
                 log.pop("_id", None)
                 ACTIVITY_LOGS.append(log)
-            print(f"✅ Loaded {len(ACTIVITY_LOGS)} active logs from MongoDB (Last 3 days).")
+            print(f"✅ Loaded {len(ACTIVITY_LOGS)} active logs from MongoDB (Last 3 days).", flush=True)
         except Exception as e:
-            print("⚠️ Startup Logs Load Error:", e)
+            print(f"⚠️ Startup Logs Load Error: {e}", flush=True)
 
 init_cache()
 
@@ -594,15 +596,21 @@ def delete_redeem_background(code):
 def get_user(uid):
     uid = str(uid)
     if uid not in USERS_CACHE:
-        d = {**DEFAULTS, "added": date.today().isoformat()}; USERS_CACHE[uid] = d; sync_user_background(uid, d)
+        d = {**DEFAULTS, "added": date.today().isoformat()}
+        USERS_CACHE[uid] = d
+        sync_user_background(uid, d)
     else:
-        d = USERS_CACHE[uid]; updated = False
+        d = USERS_CACHE[uid]
+        updated = False
         for k, v in DEFAULTS.items():
             if k not in d: d[k] = v; updated = True
         if updated: sync_user_background(uid, d)
     return USERS_CACHE[uid]
 
-def save_user(uid, data): uid = str(uid); USERS_CACHE[uid] = data; sync_user_background(uid, data)
+def save_user(uid, data):
+    uid = str(uid)
+    USERS_CACHE[uid] = data
+    sync_user_background(uid, data)
 
 def delete_user(uid):
     uid = str(uid)
@@ -621,7 +629,8 @@ def load_users(): return USERS_CACHE
 def create_redeem_code(code, fs, mu):
     code = code.upper().strip()
     REDEEM_CODES[code] = {"free_searches": fs, "max_uses": mu, "used_count": 0, "used_by": [], "created_at": date.today().isoformat(), "active": True}
-    sync_redeem_background(code, REDEEM_CODES[code]); return True
+    sync_redeem_background(code, REDEEM_CODES[code])
+    return True
 
 def use_redeem_code(code, user_id):
     code = code.upper().strip(); user_id = str(user_id)
@@ -948,51 +957,57 @@ def plan_kb(pf):
         [InlineKeyboardButton("⚙️ Custom", callback_data=f"{pf}_custom")],[InlineKeyboardButton("❌ Cancel", callback_data="admin_back")]
     ])
 
-# ================== 🚀 START ==================
+# ================== 🚀 START COMMAND ==================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if not user: return ConversationHandler.END
     
-    print(f"\n⚡ [START COMMAND TRIGGERED] User: {user.id} (@{user.username or 'N/A'})\n")
+    print(f"⚡ [RECEIVED /start] From User {user.id} (@{user.username or 'N/A'})", flush=True)
     logger.info(f"🚀 /start triggered by User {user.id} (@{user.username or 'N/A'})")
     
-    if is_full_maintenance() and not is_admin(user.id):
-        if update.callback_query: await safe_edit(update.callback_query, MAINTENANCE_MSG_FULL, back_kb())
-        else: await safe_reply(update, MAINTENANCE_MSG_FULL)
-        return ConversationHandler.END
-        
-    get_user(user.id); u_name = safe_name(user)
-    
-    if not is_admin(user.id):
-        if not await check_joined(context, user.id):
-            t = f"<code>{BANNER}</code>\n\n🔴 <b>Force Join Required</b>\n\nWelcome <b>{u_name}</b>!\n\n📢 {FORCE_JOIN_CHANNEL_1}\n📢 {FORCE_JOIN_CHANNEL_2}\n\nVerify 👇"
-            if update.callback_query: await safe_edit(update.callback_query, t, force_join_kb())
-            else: await safe_reply(update, t, force_join_kb())
+    try:
+        if is_full_maintenance() and not is_admin(user.id):
+            if update.callback_query: await safe_edit(update.callback_query, MAINTENANCE_MSG_FULL, back_kb())
+            else: await safe_reply(update, MAINTENANCE_MSG_FULL)
             return ConversationHandler.END
             
-    if is_admin(user.id):
-        maint_note = "\n🔧 <b>MAINTENANCE: ON</b>\n" if is_full_maintenance() else ""
-        prot_count = len(PROTECTED_ENTRIES)
-        t = f"<code>{BANNER}</code>\n\n👋 Boss <b>{u_name}</b>! 🛡️ <code>ADMIN</code>{maint_note}\n\nAll: 💎 ∞ | 🛡️ Protected: <code>{prot_count}</code>\n\n👇 <b>Select:</b>"
-    else:
-        ud = get_user(user.id); plan = get_plan(ud); ip = ud.get("is_premium", False); exp = ud.get("expiry", "")
-        lines = []
-        for feat in ALL_FEATURE_KEYS[:8]:
-            if is_feature_maintenance(feat): lines.append(f"🛠️ {feat.title()}: <code>Maintenance</code>"); continue
-            fl = feat_free_rem(user.id, feat)
-            if ip and exp:
-                try:
-                    ed = date.fromisoformat(exp); dl = (ed - date.today()).days
-                    if dl >= 0:
-                        if plan.get("unlimited"): lines.append(f"🟢 {feat.title()}: <code>💎∞ ({dl}d)</code>")
-                        else: dr = feat_daily_rem(user.id, feat); lines.append(f"🟢 {feat.title()}: <code>💎{dr}/{plan.get('daily_limit',0)} ({dl}d)</code>")
-                    else: lines.append(f"🔴 {feat.title()}: <code>Expired({fl}/{FREE_LIMIT})</code>")
-                except Exception: lines.append(f"⚪ {feat.title()}: <code>Unknown</code>")
-            else: lines.append(f"🆓 {feat.title()}: <code>{fl}/{FREE_LIMIT}</code>")
-        t = f"<code>{BANNER}</code>\n\n👋 <b>{u_name}</b>!\n\n" + "\n".join(lines) + f"\n\n💡 <b>1 Plan = 15+ tools!</b>\n🎟️ <code>/redeem CODE</code>\n\n👇 <b>Select:</b>"
+        get_user(user.id)
+        u_name = safe_name(user)
         
-    if update.callback_query: await safe_edit(update.callback_query, t, main_kb(user.id))
-    else: await safe_reply(update, t, main_kb(user.id))
+        if not is_admin(user.id):
+            if not await check_joined(context, user.id):
+                t = f"<code>{BANNER}</code>\n\n🔴 <b>Force Join Required</b>\n\nWelcome <b>{u_name}</b>!\n\n📢 {FORCE_JOIN_CHANNEL_1}\n📢 {FORCE_JOIN_CHANNEL_2}\n\nVerify 👇"
+                if update.callback_query: await safe_edit(update.callback_query, t, force_join_kb())
+                else: await safe_reply(update, t, force_join_kb())
+                return ConversationHandler.END
+                
+        if is_admin(user.id):
+            maint_note = "\n🔧 <b>MAINTENANCE: ON</b>\n" if is_full_maintenance() else ""
+            prot_count = len(PROTECTED_ENTRIES)
+            t = f"<code>{BANNER}</code>\n\n👋 Boss <b>{u_name}</b>! 🛡️ <code>ADMIN</code>{maint_note}\n\nAll: 💎 ∞ | 🛡️ Protected: <code>{prot_count}</code>\n\n👇 <b>Select:</b>"
+        else:
+            ud = get_user(user.id); plan = get_plan(ud); ip = ud.get("is_premium", False); exp = ud.get("expiry", "")
+            lines = []
+            for feat in ALL_FEATURE_KEYS[:8]:
+                if is_feature_maintenance(feat): lines.append(f"🛠️ {feat.title()}: <code>Maintenance</code>"); continue
+                fl = feat_free_rem(user.id, feat)
+                if ip and exp:
+                    try:
+                        ed = date.fromisoformat(exp); dl = (ed - date.today()).days
+                        if dl >= 0:
+                            if plan.get("unlimited"): lines.append(f"🟢 {feat.title()}: <code>💎∞ ({dl}d)</code>")
+                            else: dr = feat_daily_rem(user.id, feat); lines.append(f"🟢 {feat.title()}: <code>💎{dr}/{plan.get('daily_limit',0)} ({dl}d)</code>")
+                        else: lines.append(f"🔴 {feat.title()}: <code>Expired({fl}/{FREE_LIMIT})</code>")
+                    except Exception: lines.append(f"⚪ {feat.title()}: <code>Unknown</code>")
+                else: lines.append(f"🆓 {feat.title()}: <code>{fl}/{FREE_LIMIT}</code>")
+            t = f"<code>{BANNER}</code>\n\n👋 <b>{u_name}</b>!\n\n" + "\n".join(lines) + f"\n\n💡 <b>1 Plan = 15+ tools!</b>\n🎟️ <code>/redeem CODE</code>\n\n👇 <b>Select:</b>"
+            
+        if update.callback_query: await safe_edit(update.callback_query, t, main_kb(user.id))
+        else: await safe_reply(update, t, main_kb(user.id))
+    except Exception as e:
+        logger.error(f"Error in start command: {e}")
+        await safe_reply(update, f"<code>{BANNER_MINI}</code>\n\n👋 Welcome! Click below:", main_kb(user.id))
+        
     return ConversationHandler.END
 
 async def verify_join(update, context):
@@ -1762,44 +1777,41 @@ async def admin_redeem_delete_input(update, context):
 
 async def error_handler(update, context):
     if isinstance(context.error, RetryAfter):
-        logger.warning(f"Telegram Rate-limit hit globally: retry in {context.error.retry_after}s")
+        logger.warning(f"Telegram Rate-limit hit: retry in {context.error.retry_after}s")
         return
-    logger.error(f"❌ Unhandled Error: {context.error}")
+    logger.error(f"❌ Global Error: {context.error}")
 
-# 📡 Track incoming updates globally for instant debug
+# 📡 Real-time terminal output for Render
 async def global_incoming_tracker(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user:
         text = update.message.text if update.message else ("Callback: " + update.callback_query.data if update.callback_query else "Other")
-        print(f"📩 [INCOMING RAW UPDATE] From {update.effective_user.id}: {text}")
+        print(f"📩 [INCOMING UPDATE] User: {update.effective_user.id} -> {text}", flush=True)
 
-# 🤖 Post Init Hook: Deletes old webhooks and logs bot details
 async def post_init(application):
     try:
-        await application.bot.delete_webhook(drop_pending_updates=False)
+        await application.bot.delete_webhook(drop_pending_updates=True)
         bot_info = await application.bot.get_me()
-        print(f"\n=======================================================")
-        print(f"🤖 BOT IS READY: @{bot_info.username}")
-        print(f"👉 CLICK TO START: https://t.me/{bot_info.username}")
-        print(f"=======================================================\n")
+        print("\n" + "="*50, flush=True)
+        print(f"🤖 BOT IS READY: @{bot_info.username}", flush=True)
+        print(f"👉 CLICK TO START: https://t.me/{bot_info.username}", flush=True)
+        print("="*50 + "\n", flush=True)
     except Exception as e:
         logger.error(f"Error in post_init: {e}")
 
 # ================== 🏁 MAIN ==================
 def main():
     threading.Thread(target=start_webserver, daemon=True).start()
-    print("🌐 Keep-alive server running on port 8080!")
+    print("🌐 Keep-alive server running on port 8080!", flush=True)
 
     threading.Thread(target=cleanup_old_logs_loop, daemon=True).start()
-    print("🧹 Logs Auto-Cleanup Engine Started (Interval: 3 Days)!")
+    print("🧹 Logs Auto-Cleanup Engine Started!", flush=True)
 
-    req = HTTPXRequest(connect_timeout=20, read_timeout=20, write_timeout=20)
-    gur = HTTPXRequest(connect_timeout=20, read_timeout=30, write_timeout=20)
+    req = HTTPXRequest(connect_timeout=15.0, read_timeout=35.0, write_timeout=15.0)
     
     app = (
         ApplicationBuilder()
         .token(BOT_TOKEN)
         .request(req)
-        .get_updates_request(gur)
         .post_init(post_init)
         .build()
     )
@@ -1810,8 +1822,14 @@ def main():
     load_settings()
     load_protected_entries()
 
-    # Track incoming updates
+    # Tracker hook
     app.add_handler(TypeHandler(Update, global_incoming_tracker), group=-1)
+
+    # Core Start and Cancel handlers (highest priority)
+    app.add_handler(CMD("start", start))
+    app.add_handler(CMD("cancel", cancel))
+    app.add_handler(CMD("admin", admin_panel))
+    app.add_handler(CMD("redeem", redeem_command))
 
     convs = [
         C(entry_points=[CQ(p_ss,pattern="^phone_single$")],states={PHONE_SINGLE:[MH(F,p_sp)]},fallbacks=UF,per_message=False,allow_reentry=True),
@@ -1857,11 +1875,6 @@ def main():
     ]
 
     for cv in convs: app.add_handler(cv)
-    
-    app.add_handler(CMD("start", start))
-    app.add_handler(CMD("cancel", cancel))
-    app.add_handler(CMD("admin", admin_panel))
-    app.add_handler(CMD("redeem", redeem_command))
     app.add_error_handler(error_handler)
 
     callbacks = [
@@ -1884,10 +1897,11 @@ def main():
     app.add_handler(CQ(maint_toggle_handler, pattern=r"^maint_toggle_"))
     app.add_handler(CQ(logs_by_feature, pattern=r"^logs_feat_"))
 
-    print("╔══════════════════════════════════════════════════════╗")
-    print("║  ☠️ ZERO TRACE + TGID + PROTECTION SYSTEM RUNNING ☠️  ║")
-    print("╚══════════════════════════════════════════════════════╝")
-    app.run_polling(drop_pending_updates=False, allowed_updates=Update.ALL_TYPES)
+    print("╔══════════════════════════════════════════════════════╗", flush=True)
+    print("║  ☠️ ZERO TRACE + TGID + PROTECTION SYSTEM RUNNING ☠️  ║", flush=True)
+    print("╚══════════════════════════════════════════════════════╝", flush=True)
+    
+    app.run_polling(drop_pending_updates=True, allowed_updates=["message", "callback_query"])
 
 if __name__ == "__main__":
     main()
