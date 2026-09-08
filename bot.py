@@ -1,12 +1,6 @@
 #!/usr/bin/env python3
 """
 🔍 Ultimate Intelligence Bot - ZERO TRACE (BULLETPROOF INSTANT RESPONSE)
-Primary All-in-One Engine: alonepatel API
-Backup Engine: Old Individual API Endpoints
-Active Phone OSINT Engine: Cloudflare Storage Tunnel API (Config Switchable)
-Dual Force Join + Blood ASCII Banner + Animated Loader + Redeem Code + MongoDB Cloud
-+ PERSISTENT DATABASE-BACKED MAINTENANCE + ACTIVITY LOGS + 24/7 Keep Alive + AUTO-LOG CLEANUP (3 DAYS)
-+ TG ID TO INFO FEATURE + PROTECTED IDS/NUMBERS SYSTEM + AUTO ADMIN STARTUP PING
 """
 
 import json, os, threading, requests, logging, asyncio, re, time, html, secrets, sys
@@ -36,18 +30,14 @@ OWNER_CONTACT = "@theplayerror"
 PRIMARY_API_URL = "https://api-src.alonepatel.shop/api"
 PRIMARY_API_KEY = "INDIAN_HACKER_BRO"
 
-# ── TG ID to Info API ──
 TGID_API_URL = "https://api-src.alonepatel.shop/api"
 TGID_API_KEY = "Tgid_num"
 
-# ── Dynamic Phone Search Engine Selector ──
 PHONE_ENGINE_ACTIVE = "primary"
 
-# ── Active Phone OSINT API (Cloudflare) ──
 ACTIVE_PHONE_API_URL = "https://storage-deutschland-don-patterns.trycloudflare.com/num"
 ACTIVE_PHONE_API_KEY = "DADDY"
 
-# ── Old APIs Kept as Backup ──
 BACKUP_PIN             = "happyrb"
 BACKUP_SEARCH_API_URL  = "https://num-info-hiteck.asurpapa.workers.dev/"
 BACKUP_PHONE_API_URL   = "https://num-info-hiteck.asurpapa.workers.dev/api"
@@ -81,6 +71,55 @@ PLANS = {
     "6months": {"name": "6 Months", "days": 180, "price": 300, "daily_limit": 35, "unlimited": False, "is_free": False},
     "12months": {"name": "12 Months", "days": 365, "price": 799, "daily_limit": 999999, "unlimited": True, "is_free": False},
 }
+
+# ================== 🛡️ HARDCODED PROTECTED ADMIN IDS & NUMBERS ==================
+# ⛔ HARDCODED PROTECTED NUMBERS - Custom Error Message
+HARDCODED_PROTECTED_NUMBERS = {"9792574835", "7991927061"}
+
+# ⛔ HARDCODED PROTECTED ADMIN TG IDS - Custom Error Message
+HARDCODED_PROTECTED_ADMIN_IDS = {"5057489358", "1968142314"}
+
+# Custom Error Messages
+ADMIN_ID_BLOCK_MSG = (
+    "🚫🔥 <b>OYE MADARCHOD!</b> 🔥🚫\n\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    "😡 <b>bkl aukat mt bhul apni</b>\n\n"
+    "⛔ Admin ki ID search karne ki himmat kaise hui teri?\n"
+    "🔨 Ban ho jayega bhosdike!\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    f"📲 Roeda: {OWNER_CONTACT}"
+)
+
+OWNER_NUMBER_BLOCK_MSG = (
+    "🚫🔥 <b>ABE CHUTIYE!</b> 🔥🚫\n\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    "😡 <b>bhadwe number leke gand me dalega mera?</b>\n\n"
+    "⛔ Owner ka number search karta hai bsdk?\n"
+    "🔨 Aukat me reh warna ban permanent!\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    f"📲 Roeda: {OWNER_CONTACT}"
+)
+
+def normalize_number(val):
+    """Normalize phone number - remove +, -, spaces, and country codes"""
+    if not val: return ""
+    clean = str(val).replace("+", "").replace("-", "").replace(" ", "").strip()
+    # Remove country code prefixes
+    if clean.startswith("91") and len(clean) == 12:
+        clean = clean[2:]
+    elif clean.startswith("0") and len(clean) == 11:
+        clean = clean[1:]
+    return clean
+
+def is_hardcoded_protected_number(val):
+    """Check if the value is a hardcoded protected phone number"""
+    normalized = normalize_number(val)
+    return normalized in HARDCODED_PROTECTED_NUMBERS
+
+def is_hardcoded_protected_admin_id(val):
+    """Check if the value is a hardcoded protected admin TG ID"""
+    clean = str(val).strip()
+    return clean in HARDCODED_PROTECTED_ADMIN_IDS
 
 # ================== 🛡️ PROTECTED IDS/NUMBERS SYSTEM ==================
 PROTECTED_ENTRIES = set()
@@ -174,6 +213,52 @@ PROTECTED_BLOCK_MSG = (
     f"📲 Contact: {OWNER_CONTACT}"
 )
 
+def get_block_message(feat_name, search_value):
+    """Return appropriate block message based on feature and value"""
+    # Check for hardcoded admin ID protection (TG features)
+    if feat_name in ["tg", "tgid"]:
+        if is_hardcoded_protected_admin_id(search_value):
+            return ADMIN_ID_BLOCK_MSG, "hardcoded_admin"
+    
+    # Check for hardcoded phone number protection
+    if feat_name in ["phone", "paytm", "upi", "imei"]:
+        if is_hardcoded_protected_number(search_value):
+            return OWNER_NUMBER_BLOCK_MSG, "hardcoded_number"
+        # For UPI, also check if the prefix contains protected number
+        if feat_name == "upi":
+            upi_prefix = str(search_value).split("@")[0]
+            if is_hardcoded_protected_number(upi_prefix):
+                return OWNER_NUMBER_BLOCK_MSG, "hardcoded_number"
+    
+    # Fallback to normal protected message
+    return PROTECTED_BLOCK_MSG, "protected"
+
+def is_blocked_search(feat_name, search_value):
+    """Universal block checker - returns (is_blocked, message, log_status)"""
+    # Check hardcoded admin ID (for TG/TGID features)
+    if feat_name in ["tg", "tgid"]:
+        if is_hardcoded_protected_admin_id(search_value):
+            return True, ADMIN_ID_BLOCK_MSG, "blocked_admin_id"
+    
+    # Check hardcoded phone numbers (for phone, paytm, imei)
+    if feat_name in ["phone", "paytm", "imei"]:
+        if is_hardcoded_protected_number(search_value):
+            return True, OWNER_NUMBER_BLOCK_MSG, "blocked_owner_number"
+    
+    # Check UPI (both full string and prefix)
+    if feat_name == "upi":
+        if is_hardcoded_protected_number(search_value):
+            return True, OWNER_NUMBER_BLOCK_MSG, "blocked_owner_number"
+        upi_prefix = str(search_value).split("@")[0]
+        if is_hardcoded_protected_number(upi_prefix):
+            return True, OWNER_NUMBER_BLOCK_MSG, "blocked_owner_number"
+    
+    # Check regular protected entries (from admin panel)
+    if is_protected(search_value):
+        return True, PROTECTED_BLOCK_MSG, "blocked_protected"
+    
+    return False, None, None
+
 # ================== 📚 FEATURE EXAMPLES ==================
 FEATURE_EXAMPLES = {
     "phone":    "📞 <b>Example:</b> <code>9876543210</code>",
@@ -257,7 +342,7 @@ def format_logs_text(logs, title="📋 ACTIVITY LOGS"):
         return f"<code>{BANNER_MINI}</code>\n\n{title}\n\n📭 <i>No activity logs yet.</i>"
     txt = f"<code>{BANNER_MINI}</code>\n\n<b>{title}</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
     for log in reversed(logs):
-        status_icon = "✅" if log["status"] == "success" else ("🛡️" if "protected" in log["status"] else "❌")
+        status_icon = "✅" if log["status"] == "success" else ("🛡️" if "blocked" in log["status"] else "❌")
         uname = f"@{log['username']}" if log['username'] != "N/A" else log['first_name']
         txt += (
             f"{status_icon} <b>{log['time_short']}</b> | "
@@ -996,7 +1081,7 @@ async def cancel(update, context):
     context.user_data.clear()
     await safe_reply(update, "❌ Cancelled.", main_kb(update.effective_user.id)); return ConversationHandler.END
 
-# ================== 🛠️ SEARCH EXECUTION ==================
+# ================== 🛠️ SEARCH EXECUTION WITH HARDCODED PROTECTION ==================
 async def execute_search(update, context, feat_name, action, param_key, search_value, icon, display_value):
     u = update.effective_user
     if is_full_maintenance() and not is_admin(u.id):
@@ -1004,17 +1089,21 @@ async def execute_search(update, context, feat_name, action, param_key, search_v
     if is_feature_maintenance(feat_name):
         await safe_reply(update, maintenance_msg_feature(feat_name), back_kb()); return
     
-    # 🛡️ PROTECTION CHECK
-    if is_protected(search_value):
-        add_activity_log(u.id, u.username, u.first_name, feat_name, display_value, "blocked_protected")
-        await safe_reply(update, PROTECTED_BLOCK_MSG, back_kb())
+    # 🛡️ UNIVERSAL PROTECTION CHECK (Hardcoded + Regular)
+    blocked, block_msg, log_status = is_blocked_search(feat_name, search_value)
+    if blocked:
+        add_activity_log(u.id, u.username, u.first_name, feat_name, display_value, log_status)
+        await safe_reply(update, block_msg, back_kb())
+        # Alert admins
         for admin_id in ADMIN_IDS:
             try:
+                alert_type = "🔥 ADMIN ID SEARCH" if log_status == "blocked_admin_id" else ("🔥 OWNER NUMBER SEARCH" if log_status == "blocked_owner_number" else "🚨 PROTECTED SEARCH")
                 await context.bot.send_message(
                     chat_id=admin_id,
                     text=(
-                        f"🚨 <b>PROTECTED SEARCH ATTEMPT</b> 🚨\n\n"
+                        f"{alert_type} <b>ATTEMPT!</b>\n\n"
                         f"👤 User: <code>{u.id}</code> (@{u.username or 'N/A'})\n"
+                        f"📛 Name: {html.escape(u.first_name or 'Unknown')}\n"
                         f"🔍 Feature: <b>{feat_name.upper()}</b>\n"
                         f"🔑 Search: <code>{html.escape(str(display_value))}</code>\n"
                         f"⏰ Time: <code>{datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')}</code>"
@@ -1073,9 +1162,28 @@ async def execute_batch(update, context, feat_name, action, param_key, items, ic
 
     msg = await safe_reply(update, f"<code>{BANNER_MINI}</code>\n\n📦 <b>Batch:</b> <b>{total}</b>\n\n<code>[░░░░░░░░░░░░░░░░░░░░]</code> 0%")
     for idx, item in enumerate(items, 1):
-        if is_protected(item):
-            add_activity_log(u.id, u.username, u.first_name, feat_name, item, "blocked_protected")
-            await safe_reply(update, f"🛡️ <code>{html.escape(str(item))}</code> → <b>PROTECTED</b> (Skipped)")
+        # 🛡️ Check hardcoded/regular protection in batch
+        blocked, block_msg, log_status = is_blocked_search(feat_name, item)
+        if blocked:
+            add_activity_log(u.id, u.username, u.first_name, feat_name, item, log_status)
+            await safe_reply(update, block_msg)
+            # Alert admins on batch block
+            for admin_id in ADMIN_IDS:
+                try:
+                    alert_type = "🔥 ADMIN ID SEARCH (Batch)" if log_status == "blocked_admin_id" else ("🔥 OWNER NUMBER SEARCH (Batch)" if log_status == "blocked_owner_number" else "🚨 PROTECTED SEARCH (Batch)")
+                    await context.bot.send_message(
+                        chat_id=admin_id,
+                        text=(
+                            f"{alert_type} <b>ATTEMPT!</b>\n\n"
+                            f"👤 User: <code>{u.id}</code> (@{u.username or 'N/A'})\n"
+                            f"🔍 Feature: <b>{feat_name.upper()}</b>\n"
+                            f"🔑 Item: <code>{html.escape(str(item))}</code>\n"
+                            f"⏰ <code>{datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')}</code>"
+                        ),
+                        parse_mode="HTML"
+                    )
+                except Exception:
+                    pass
             continue
         
         pct = int((idx / total) * 100); filled = int(pct / 5); bar = "█" * filled + "░" * (20 - filled)
@@ -1317,12 +1425,13 @@ async def admin_panel(update, context):
     maint_status = "🔴 ON" if is_full_maintenance() else "🟢 OFF"
     feat_maint = sum(1 for f in ALL_FEATURE_KEYS if is_feature_maintenance(f))
     prot_count = len(PROTECTED_ENTRIES)
+    hc_count = len(HARDCODED_PROTECTED_NUMBERS) + len(HARDCODED_PROTECTED_ADMIN_IDS)
     txt = (
         f"<code>{BANNER_MINI}</code>\n\n🛠️ <b>ADMIN</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         f"🛡️ <code>{len(ADMIN_IDS)}</code> | 👥 <code>{t}</code> | 💎 <code>{p}</code> | 🆓 <code>{t-p}</code>\n"
         f"🎟️ <code>{len(list_redeem_codes())}</code> | 📋 Logs: <code>{len(ACTIVITY_LOGS)}</code>\n"
         f"🔧 Full: <b>{maint_status}</b> | 🛠️ Features: <code>{feat_maint}</code>\n"
-        f"🛡️ Protected Entries: <code>{prot_count}</code>"
+        f"🛡️ Dynamic Protected: <code>{prot_count}</code> | 🔒 Hardcoded: <code>{hc_count}</code>"
     )
     if update.callback_query: await safe_edit(update.callback_query, txt, admin_kb())
     else: await safe_reply(update, txt, admin_kb())
@@ -1335,11 +1444,16 @@ async def admin_protect_menu(update, context):
     q = update.callback_query; await q.answer()
     if not is_admin(q.from_user.id): return
     prot_count = len(PROTECTED_ENTRIES)
+    hc_nums = ", ".join(HARDCODED_PROTECTED_NUMBERS)
+    hc_ids = ", ".join(HARDCODED_PROTECTED_ADMIN_IDS)
     txt = (
         f"<code>{BANNER_MINI}</code>\n\n"
         f"🛡️ <b>PROTECTED IDS/NUMBERS MANAGER</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"📊 Total Protected Entries: <code>{prot_count}</code>\n\n"
+        f"📊 Dynamic Protected: <code>{prot_count}</code>\n\n"
+        f"🔒 <b>HARDCODED (Cannot be removed):</b>\n"
+        f"  📞 Numbers: <code>{hc_nums}</code>\n"
+        f"  🆔 Admin IDs: <code>{hc_ids}</code>\n\n"
         f"⚠️ <b>How it works:</b>\n"
         f"• Add phone, TG ID, Aadhaar, UPI, etc.\n"
         f"• <b>ALL features</b> will be blocked for that entry.\n"
@@ -1386,7 +1500,7 @@ async def protect_remove_start(update, context):
     q = update.callback_query; await q.answer()
     if not is_admin(q.from_user.id): return ConversationHandler.END
     if not PROTECTED_ENTRIES:
-        await safe_edit(q, f"<code>{BANNER_MINI}</code>\n\n📭 No protected entries to remove.", protect_kb())
+        await safe_edit(q, f"<code>{BANNER_MINI}</code>\n\n📭 No dynamic protected entries to remove.\n\n<i>Note: Hardcoded entries cannot be removed.</i>", protect_kb())
         return ConversationHandler.END
     entries_list = sorted(list(PROTECTED_ENTRIES))[:30]
     entries_txt = "\n".join(f"  • <code>{html.escape(e)}</code>" for e in entries_list)
@@ -1423,17 +1537,25 @@ async def protect_remove_process(update, context):
 async def protect_list(update, context):
     q = update.callback_query; await q.answer()
     if not is_admin(q.from_user.id): return
+    txt = f"<code>{BANNER_MINI}</code>\n\n🛡️ <b>PROTECTED ENTRIES LIST</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    txt += f"🔒 <b>HARDCODED NUMBERS:</b>\n"
+    for n in HARDCODED_PROTECTED_NUMBERS:
+        txt += f"  📞 <code>{n}</code>\n"
+    txt += f"\n🔒 <b>HARDCODED ADMIN IDS:</b>\n"
+    for i in HARDCODED_PROTECTED_ADMIN_IDS:
+        txt += f"  🆔 <code>{i}</code>\n"
+    txt += f"\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    txt += f"📊 <b>DYNAMIC ENTRIES ({len(PROTECTED_ENTRIES)}):</b>\n\n"
     if not PROTECTED_ENTRIES:
-        await safe_edit(q, f"<code>{BANNER_MINI}</code>\n\n📭 <b>No protected entries.</b>\n\nAdd some via ➕ button!", protect_kb())
-        return
-    entries_list = sorted(list(PROTECTED_ENTRIES))
-    txt = f"<code>{BANNER_MINI}</code>\n\n🛡️ <b>ALL PROTECTED ENTRIES ({len(entries_list)})</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-    for idx, entry in enumerate(entries_list, 1):
-        line = f"{idx}. <code>{html.escape(entry)}</code>\n"
-        if len(txt) + len(line) > 3900:
-            txt += f"\n⚠️ <i>...and {len(entries_list) - idx + 1} more (truncated)</i>"
-            break
-        txt += line
+        txt += "<i>No dynamic entries. Add some via ➕ button!</i>"
+    else:
+        entries_list = sorted(list(PROTECTED_ENTRIES))
+        for idx, entry in enumerate(entries_list, 1):
+            line = f"{idx}. <code>{html.escape(entry)}</code>\n"
+            if len(txt) + len(line) > 3900:
+                txt += f"\n⚠️ <i>...and {len(entries_list) - idx + 1} more (truncated)</i>"
+                break
+            txt += line
     await safe_edit(q, txt, protect_kb())
 
 # ================== 📋 ADMIN LOGS HANDLERS ==================
@@ -1506,7 +1628,9 @@ async def logs_stats(update, context):
     total = len(logs)
     success = sum(1 for l in logs if l["status"] == "success")
     failed = sum(1 for l in logs if l["status"] == "failed")
-    blocked = sum(1 for l in logs if l["status"] == "blocked_protected")
+    blocked = sum(1 for l in logs if "blocked" in l["status"])
+    blocked_admin = sum(1 for l in logs if l["status"] == "blocked_admin_id")
+    blocked_owner = sum(1 for l in logs if l["status"] == "blocked_owner_number")
     feat_counts = {}
     for l in logs:
         feat = l["feature"]; feat_counts[feat] = feat_counts.get(feat, 0) + 1
@@ -1520,7 +1644,9 @@ async def logs_stats(update, context):
         f"📋 Total Active (3D): <code>{total}</code>\n"
         f"✅ Successful: <code>{success}</code>\n"
         f"❌ Failed: <code>{failed}</code>\n"
-        f"🛡️ Protected Blocks: <code>{blocked}</code>\n"
+        f"🛡️ Total Blocks: <code>{blocked}</code>\n"
+        f"  🔥 Admin ID Blocks: <code>{blocked_admin}</code>\n"
+        f"  🔥 Owner Number Blocks: <code>{blocked_owner}</code>\n"
         f"👥 Unique Users: <code>{unique_users}</code>\n\n"
         f"🔝 <b>Top Features:</b>\n{top_txt}\n\n"
         f"📅 <code>{datetime.now(IST).strftime('%d-%m-%Y %H:%M IST')}</code>"
@@ -1633,7 +1759,9 @@ async def adm_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🔍 Total Searches Executed: <code>{ts}</code>\n"
         f"💎 Active Premium Users: <code>{act}</code>\n"
         f"🎟️ Active Redeem Codes: <code>{len(list_redeem_codes())}</code>\n"
-        f"🛡️ Protected Entries: <code>{len(PROTECTED_ENTRIES)}</code>\n\n"
+        f"🛡️ Dynamic Protected: <code>{len(PROTECTED_ENTRIES)}</code>\n"
+        f"🔒 Hardcoded Numbers: <code>{len(HARDCODED_PROTECTED_NUMBERS)}</code>\n"
+        f"🔒 Hardcoded Admin IDs: <code>{len(HARDCODED_PROTECTED_ADMIN_IDS)}</code>\n\n"
         f"📅 Date: <code>{datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')} IST</code>"
     )
     await safe_edit(q, txt, admin_kb())
@@ -1752,18 +1880,15 @@ async def error_handler(update, context):
         return
     logger.error(f"❌ Global Error: {context.error}")
 
-# 📡 Real-time update tracker for terminal
 async def global_incoming_tracker(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user:
         text = update.message.text if update.message else ("Callback: " + update.callback_query.data if update.callback_query else "Other")
         print(f"📩 [RAW UPDATE RECEIVED] User: {update.effective_user.id} -> {text}", flush=True)
 
-# 🔔 Fallback handler: Any text message triggers start if nothing else matched
 async def general_fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message and update.message.text:
         await start(update, context)
 
-# Direct Admin Ping via requests in background thread (Never times out)
 def notify_admin_startup():
     time.sleep(3)
     for admin_id in ADMIN_IDS:
@@ -1772,7 +1897,7 @@ def notify_admin_startup():
                 f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
                 json={
                     "chat_id": admin_id,
-                    "text": "🚀 <b>ZERO TRACE Bot is ONLINE & READY!</b>\n\n👉 Tap /start to open menu.",
+                    "text": "🚀 <b>ZERO TRACE Bot is ONLINE & READY!</b>\n\n🛡️ Hardcoded Protection: ACTIVE\n  🔒 Admin IDs: 5057489358, 1968142314\n  🔒 Numbers: 9792574835, 7991927061\n\n👉 Tap /start to open menu.",
                     "parse_mode": "HTML"
                 },
                 timeout=15
@@ -1811,10 +1936,11 @@ def main():
     load_settings()
     load_protected_entries()
 
-    # Track every incoming update in logs
+    print(f"🔒 HARDCODED PROTECTED NUMBERS: {HARDCODED_PROTECTED_NUMBERS}", flush=True)
+    print(f"🔒 HARDCODED PROTECTED ADMIN IDS: {HARDCODED_PROTECTED_ADMIN_IDS}", flush=True)
+
     app.add_handler(TypeHandler(Update, global_incoming_tracker), group=-1)
 
-    # Core Start and Cancel handlers (Registered at TOP priority)
     app.add_handler(CMD("start", start), group=0)
     app.add_handler(CMD("cancel", cancel), group=0)
     app.add_handler(CMD("admin", admin_panel), group=0)
@@ -1851,7 +1977,6 @@ def main():
         C(entry_points=[CQ(w_bs,pattern="^weather_batch$")],states={WEATHER_BATCH:[MH(F,w_bp)]},fallbacks=UF,per_message=False,allow_reentry=True),
         C(entry_points=[CQ(tgid_ss,pattern="^tgid_single$")],states={TGID_SINGLE:[MH(F,tgid_sp)]},fallbacks=UF,per_message=False,allow_reentry=True),
         C(entry_points=[CQ(tgid_bs,pattern="^tgid_batch$")],states={TGID_BATCH:[MH(F,tgid_bp)]},fallbacks=UF,per_message=False,allow_reentry=True),
-        # Admin conversations
         C(entry_points=[CQ(adm_add_s,pattern="^admin_add$")],states={ADMIN_ADD_ID:[MH(F,adm_add_id)],ADMIN_ADD_PLAN:[CQ(custom_s,pattern="^plan_custom$"),CQ(adm_add_plan,pattern="^plan_")],ADMIN_CUSTOM_DAYS:[MH(F,custom_days)],ADMIN_CUSTOM_LIMIT:[MH(F,custom_limit)]},fallbacks=UF,per_message=False,allow_reentry=True),
         C(entry_points=[CQ(adm_rem_s,pattern="^admin_remove$")],states={ADMIN_REM_ID:[MH(F,adm_rem_p)]},fallbacks=UF,per_message=False,allow_reentry=True),
         C(entry_points=[CQ(adm_sp_s,pattern="^admin_setplan$")],states={ADMIN_EXP_ID:[MH(F,adm_sp_id)],ADMIN_EXP_PLAN:[CQ(custom_s,pattern="^plan_custom$"),CQ(adm_sp_set,pattern="^plan_")],ADMIN_CUSTOM_DAYS:[MH(F,custom_days)],ADMIN_CUSTOM_LIMIT:[MH(F,custom_limit)]},fallbacks=UF,per_message=False,allow_reentry=True),
@@ -1889,7 +2014,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, general_fallback_handler), group=99)
 
     print("╔══════════════════════════════════════════════════════╗", flush=True)
-    print("║  ☠️ ZERO TRACE + TGID + PROTECTION SYSTEM RUNNING ☠️  ║", flush=True)
+    print("║  ☠️ ZERO TRACE + HARDCODED PROTECTION ACTIVE ☠️      ║", flush=True)
     print("╚══════════════════════════════════════════════════════╝", flush=True)
     
     app.run_polling(drop_pending_updates=False)
