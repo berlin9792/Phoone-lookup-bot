@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-🔍 Ultimate Intelligence Bot - ZERO TRACE (DYNAMIC PHONE ENGINE UPDATE)
+🔍 Ultimate Intelligence Bot - ZERO TRACE (BULLETPROOF INSTANT RESPONSE)
 Primary All-in-One Engine: alonepatel API
 Backup Engine: Old Individual API Endpoints
 Active Phone OSINT Engine: Cloudflare Storage Tunnel API (Config Switchable)
@@ -21,7 +21,6 @@ from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler,
     MessageHandler, ConversationHandler, ContextTypes, filters, TypeHandler
 )
-from telegram.request import HTTPXRequest
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -30,7 +29,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ================== ⚙️ CONFIG ==================
-# Direct token prioritize taaki Render ka purana cached Env Var issue na kare
+# Direct Token binding (Never overridden by old Render environment variables)
 BOT_TOKEN     = "8642873626:AAG84pEyNRjx6VYilnGlIpNEILD_ZRlNdE8"
 ADMIN_IDS     = [5057489358, 1968142314]
 OWNER_CONTACT = "@theplayerror"
@@ -504,9 +503,8 @@ async def check_joined(context, uid):
             if m1.status not in ["member","administrator","creator","restricted"]: return False
             m2 = await context.bot.get_chat_member(FORCE_JOIN_CHANNEL_2_ID, uid)
             return m2.status in ["member","administrator","creator","restricted"]
-        return await asyncio.wait_for(_check(), timeout=2.5)
+        return await asyncio.wait_for(_check(), timeout=2.0)
     except Exception as e:
-        logger.warning(f"Join check fast-bypass for User {uid}: {e}")
         return True
 
 def force_join_kb():
@@ -521,12 +519,10 @@ USERS_CACHE = {}; REDEEM_CODES = {}
 LOCAL_FILE = Path("users.json"); REDEEM_FILE = Path("redeem_codes.json")
 
 try:
-    mc = MongoClient(MONGO_URI, serverSelectionTimeoutMS=2500)
+    mc = MongoClient(MONGO_URI, serverSelectionTimeoutMS=2000)
     db = mc["tele_intel_bot"]; users_col = db["users"]; redeem_col = db["redeem_codes"]
-    mc.admin.command('ping')
-    print("✅ MongoDB Connected Successfully!", flush=True)
+    print("✅ MongoDB Setup Initialized!", flush=True)
 except Exception as e:
-    print(f"⚠️ MongoDB Connection Notice: {e}", flush=True)
     users_col = None; redeem_col = None; db = None
 
 DEFAULTS = {"plan": "trial", "expiry": "", "is_premium": False, "total_searches": 0, "redeemed_codes": []}
@@ -549,20 +545,6 @@ def init_cache():
     elif REDEEM_FILE.exists():
         try: REDEEM_CODES = json.loads(REDEEM_FILE.read_text())
         except Exception: REDEEM_CODES = {}
-        
-    if db is not None:
-        try:
-            logs_col = db["activity_logs"]
-            three_days_ago = time.time() - (3 * 24 * 3600)
-            cursor = logs_col.find({"timestamp": {"$gte": three_days_ago}}).sort("timestamp", -1).limit(200)
-            loaded_logs = list(cursor)
-            ACTIVITY_LOGS.clear()
-            for log in reversed(loaded_logs):
-                log.pop("_id", None)
-                ACTIVITY_LOGS.append(log)
-            print(f"✅ Loaded {len(ACTIVITY_LOGS)} active logs from MongoDB (Last 3 days).", flush=True)
-        except Exception as e:
-            print(f"⚠️ Startup Logs Load Error: {e}", flush=True)
 
 init_cache()
 
@@ -599,18 +581,10 @@ def get_user(uid):
         d = {**DEFAULTS, "added": date.today().isoformat()}
         USERS_CACHE[uid] = d
         sync_user_background(uid, d)
-    else:
-        d = USERS_CACHE[uid]
-        updated = False
-        for k, v in DEFAULTS.items():
-            if k not in d: d[k] = v; updated = True
-        if updated: sync_user_background(uid, d)
     return USERS_CACHE[uid]
 
 def save_user(uid, data):
-    uid = str(uid)
-    USERS_CACHE[uid] = data
-    sync_user_background(uid, data)
+    uid = str(uid); USERS_CACHE[uid] = data; sync_user_background(uid, data)
 
 def delete_user(uid):
     uid = str(uid)
@@ -957,13 +931,14 @@ def plan_kb(pf):
         [InlineKeyboardButton("⚙️ Custom", callback_data=f"{pf}_custom")],[InlineKeyboardButton("❌ Cancel", callback_data="admin_back")]
     ])
 
-# ================== 🚀 START COMMAND ==================
+# ================== 🚀 BULLETPROOF START COMMAND ==================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if not user: return ConversationHandler.END
     
-    print(f"⚡ [RECEIVED /start] From User {user.id} (@{user.username or 'N/A'})", flush=True)
-    logger.info(f"🚀 /start triggered by User {user.id} (@{user.username or 'N/A'})")
+    print(f"\n=======================================================", flush=True)
+    print(f"⚡ [RECEIVED /start] From User: {user.id} (@{user.username or 'N/A'})", flush=True)
+    print(f"=======================================================\n", flush=True)
     
     try:
         if is_full_maintenance() and not is_admin(user.id):
@@ -1777,42 +1752,44 @@ async def admin_redeem_delete_input(update, context):
 
 async def error_handler(update, context):
     if isinstance(context.error, RetryAfter):
-        logger.warning(f"Telegram Rate-limit hit: retry in {context.error.retry_after}s")
         return
     logger.error(f"❌ Global Error: {context.error}")
 
-# 📡 Real-time terminal output for Render
+# 📡 Real-time update tracker for terminal
 async def global_incoming_tracker(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user:
         text = update.message.text if update.message else ("Callback: " + update.callback_query.data if update.callback_query else "Other")
-        print(f"📩 [INCOMING UPDATE] User: {update.effective_user.id} -> {text}", flush=True)
+        print(f"📩 [RAW UPDATE RECEIVED] User: {update.effective_user.id} -> {text}", flush=True)
 
-async def post_init(application):
-    try:
-        await application.bot.delete_webhook(drop_pending_updates=True)
-        bot_info = await application.bot.get_me()
-        print("\n" + "="*50, flush=True)
-        print(f"🤖 BOT IS READY: @{bot_info.username}", flush=True)
-        print(f"👉 CLICK TO START: https://t.me/{bot_info.username}", flush=True)
-        print("="*50 + "\n", flush=True)
-    except Exception as e:
-        logger.error(f"Error in post_init: {e}")
+# 🔔 Fallback handler: Any text message triggers start if nothing else matched
+async def general_fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message and update.message.text:
+        await start(update, context)
 
 # ================== 🏁 MAIN ==================
 def main():
+    # 1. Force flush any stale Telegram webhooks directly before starting polling
+    try:
+        r = requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook?drop_pending_updates=true", timeout=10)
+        bot_data = requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/getMe", timeout=10).json()
+        if bot_data.get("ok"):
+            b_user = bot_data["result"]["username"]
+            print("\n" + "="*50, flush=True)
+            print(f"🤖 CONNECTED BOT: @{b_user}", flush=True)
+            print(f"👉 CLICK HERE TO OPEN: https://t.me/{b_user}", flush=True)
+            print("="*50 + "\n", flush=True)
+    except Exception as e:
+        print(f"⚠️ Pre-init check error: {e}", flush=True)
+
     threading.Thread(target=start_webserver, daemon=True).start()
     print("🌐 Keep-alive server running on port 8080!", flush=True)
 
     threading.Thread(target=cleanup_old_logs_loop, daemon=True).start()
     print("🧹 Logs Auto-Cleanup Engine Started!", flush=True)
 
-    req = HTTPXRequest(connect_timeout=15.0, read_timeout=35.0, write_timeout=15.0)
-    
     app = (
         ApplicationBuilder()
         .token(BOT_TOKEN)
-        .request(req)
-        .post_init(post_init)
         .build()
     )
 
@@ -1822,10 +1799,10 @@ def main():
     load_settings()
     load_protected_entries()
 
-    # Tracker hook
+    # Track every incoming update in logs
     app.add_handler(TypeHandler(Update, global_incoming_tracker), group=-1)
 
-    # Core Start and Cancel handlers (highest priority)
+    # Core Start and Cancel handlers
     app.add_handler(CMD("start", start))
     app.add_handler(CMD("cancel", cancel))
     app.add_handler(CMD("admin", admin_panel))
@@ -1896,12 +1873,15 @@ def main():
     
     app.add_handler(CQ(maint_toggle_handler, pattern=r"^maint_toggle_"))
     app.add_handler(CQ(logs_by_feature, pattern=r"^logs_feat_"))
+    
+    # Catch any text as /start
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, general_fallback_handler), group=99)
 
     print("╔══════════════════════════════════════════════════════╗", flush=True)
     print("║  ☠️ ZERO TRACE + TGID + PROTECTION SYSTEM RUNNING ☠️  ║", flush=True)
     print("╚══════════════════════════════════════════════════════╝", flush=True)
     
-    app.run_polling(drop_pending_updates=True, allowed_updates=["message", "callback_query"])
+    app.run_polling(drop_pending_updates=False)
 
 if __name__ == "__main__":
     main()
