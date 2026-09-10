@@ -3,6 +3,8 @@
 🔍 Ultimate Intelligence Bot - ZERO TRACE (BULLETPROOF INSTANT RESPONSE)
 + CUSTOM ERROR POPUP DIALOG SYSTEM
 + UPDATED PRICING PLANS
++ SMART SILENT GROUP HANDLING
++ ADVANCED PHOTO/TEXT BROADCASTER
 """
 
 import json, os, threading, requests, logging, asyncio, re, time, html, secrets, sys
@@ -12,7 +14,7 @@ from collections import deque
 from flask import Flask
 from pymongo import MongoClient
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.error import RetryAfter, BadRequest, TelegramError
+from telegram.error import RetryAfter, BadRequest, TelegramError, Forbidden
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler,
     MessageHandler, ConversationHandler, ContextTypes, filters, TypeHandler
@@ -1069,6 +1071,32 @@ def plan_kb(pf):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if not user: return ConversationHandler.END
+
+    chat = update.effective_chat
+    chat_type = chat.type if chat else "private"
+
+    # ✅ 1. GROUP CHAT HANDLING: Don't spam groups. Point users to DM.
+    if chat_type in ["group", "supergroup"]:
+        # Only respond if the command specifically called the bot
+        bot_username = context.bot.username or ""
+        msg_text = update.message.text if update.message else ""
+        if msg_text and f"@{bot_username}" not in msg_text and not msg_text.startswith("/start"):
+            return ConversationHandler.END
+        
+        try:
+            await update.effective_message.reply_text(
+                f"👋 <b>Hey {safe_name(user)}!</b>\n\n"
+                f"🛡️ <b>ZERO TRACE OSINT Bot</b> works in private messages to protect privacy.\n\n"
+                f"👉 Click below to open bot in PM:",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🤖 Open In Private PM ↗️", url=f"https://t.me/{context.bot.username}?start=start")]
+                ])
+            )
+        except Exception: pass
+        return ConversationHandler.END
+
+    # ✅ 2. PRIVATE CHAT HANDLING
     try:
         if is_full_maintenance() and not is_admin(user.id):
             popup = popup_full_maintenance()
@@ -1649,33 +1677,184 @@ async def adm_monitor(update, context):
     free = sum(1 for u,v in load_users().items() if not v.get("is_premium") and int(u) not in ADMIN_IDS)
     await safe_edit(q, f"<code>{BANNER_MINI}</code>\n\n🆓 Free Users: <code>{free}</code>", admin_kb())
 
-async def bc_start(u,c):
+# ================== 📢 BROADCAST SYSTEM (PRO FIXED) ==================
+async def bc_start(u, c):
     q = u.callback_query; await q.answer()
     if not is_admin(q.from_user.id): return ConversationHandler.END
-    await safe_edit(q, "📢 Send message or /cancel:"); return ADMIN_BROADCAST_MSG
+    await safe_edit(
+        q,
+        f"<code>{BANNER_MINI}</code>\n\n"
+        f"📢 <b>ADMIN BROADCAST</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"✍️ <b>Send your broadcast message now.</b>\n\n"
+        f"💡 <i>Supports:</i>\n"
+        f"  • Text messages (with HTML formatting)\n"
+        f"  • Photos with caption\n\n"
+        f"❌ Send /cancel to abort.",
+        InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="admin_back")]])
+    )
+    return ADMIN_BROADCAST_MSG
 
-async def bc_msg(u,c):
-    m = u.message.text.strip(); c.user_data["bc"] = m
-    await safe_reply(u, f"📢 Preview:\n\n{html.escape(m)}\n\n👥 {len(load_users())} users",
-        InlineKeyboardMarkup([[InlineKeyboardButton("✅ Send",callback_data="broadcast_confirm")],[InlineKeyboardButton("❌ Cancel",callback_data="broadcast_cancel")]]))
+async def bc_msg(u, c):
+    msg = u.message
+    if not msg: return ADMIN_BROADCAST_MSG
+    
+    broadcast_data = {}
+    if msg.photo:
+        broadcast_data["type"] = "photo"
+        broadcast_data["file_id"] = msg.photo[-1].file_id
+        broadcast_data["caption"] = msg.caption or ""
+        preview_text = f"📷 <b>Photo Broadcast</b>\n\n{html.escape(broadcast_data['caption']) if broadcast_data['caption'] else '<i>(No Caption)</i>'}"
+    elif msg.text:
+        broadcast_data["type"] = "text"
+        broadcast_data["text"] = msg.text
+        preview_text = html.escape(msg.text)
+    else:
+        await safe_reply(u, "❌ Only text or photos with caption are supported! Send again or /cancel:")
+        return ADMIN_BROADCAST_MSG
+    
+    c.user_data["bc"] = broadcast_data
+    total_users = len(load_users())
+    
+    await safe_reply(
+        u,
+        f"<code>{BANNER_MINI}</code>\n\n"
+        f"📢 <b>BROADCAST PREVIEW</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"{preview_text[:2000]}\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"👥 <b>Target Audience:</b> <code>{total_users} users</code>\n\n"
+        f"⚠️ Are you sure you want to broadcast this message to all users?",
+        InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ CONFIRM & SEND", callback_data="broadcast_confirm")],
+            [InlineKeyboardButton("❌ CANCEL", callback_data="broadcast_cancel")]
+        ])
+    )
     return ADMIN_BROADCAST_CONFIRM
 
-async def bc_confirm(u,c):
+async def bc_confirm(u, c):
     q = u.callback_query; await q.answer()
-    if q.data == "broadcast_cancel": await safe_edit(q, "❌ Cancelled.", admin_kb()); c.user_data.pop("bc",None); return ConversationHandler.END
-    msg = c.user_data.get("bc",""); users = load_users(); total = len(users)
-    bt = f"<code>{BANNER_MINI}</code>\n\n📢 <b>ANNOUNCEMENT</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━\n\n{html.escape(msg)}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━\n💬 {OWNER_CONTACT}"
-    sm = await safe_reply(u, f"🚀 {total}..."); s,f2,b,ct = 0,0,0,0
-    for uid in users:
-        ct += 1
-        try: await c.bot.send_message(chat_id=int(uid), text=bt, parse_mode="HTML"); s += 1
-        except Exception as e:
-            if any(w in str(e).lower() for w in ["blocked","forbidden","not found"]): b += 1
-            else: f2 += 1
-        if ct%15==0 or ct==total: await safe_edit(sm, f"🚀 {ct}/{total}|✅{s}|🚫{b}|❌{f2}")
-        await asyncio.sleep(0.05)
-    await safe_reply(u, f"✅ Done! ✅{s} 🚫{b} ❌{f2}", admin_kb()); c.user_data.pop("bc",None); return ConversationHandler.END
+    if q.data == "broadcast_cancel":
+        await safe_edit(q, "❌ Broadcast cancelled.", admin_kb())
+        c.user_data.pop("bc", None)
+        return ConversationHandler.END
+    
+    broadcast_data = c.user_data.get("bc")
+    if not broadcast_data:
+        await safe_edit(q, "❌ Broadcast session expired. Try again.", admin_kb())
+        return ConversationHandler.END
+    
+    users = load_users()
+    user_ids = list(users.keys())
+    total = len(user_ids)
+    
+    status_msg = await safe_edit(
+        q,
+        f"<code>{BANNER_MINI}</code>\n\n"
+        f"🚀 <b>Broadcasting in progress...</b>\n\n"
+        f"📊 <code>0/{total}</code>\n"
+        f"<code>[░░░░░░░░░░░░░░░░░░░░]</code> 0%"
+    )
+    
+    sent, failed, blocked, count = 0, 0, 0, 0
+    
+    for uid in user_ids:
+        count += 1
+        try:
+            target_id = int(uid)
+            if broadcast_data["type"] == "photo":
+                caption_text = broadcast_data.get("caption", "")
+                full_caption = (
+                    f"<code>{BANNER_MINI}</code>\n\n"
+                    f"📢 <b>ANNOUNCEMENT</b>\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                    f"{caption_text}\n\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"💬 {OWNER_CONTACT}"
+                ) if caption_text else f"📢 <b>ANNOUNCEMENT</b>\n\n💬 {OWNER_CONTACT}"
+                
+                await c.bot.send_photo(
+                    chat_id=target_id,
+                    photo=broadcast_data["file_id"],
+                    caption=full_caption[:1024],
+                    parse_mode="HTML"
+                )
+            else:
+                full_text = (
+                    f"<code>{BANNER_MINI}</code>\n\n"
+                    f"📢 <b>ANNOUNCEMENT</b>\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                    f"{broadcast_data['text']}\n\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"💬 {OWNER_CONTACT}"
+                )
+                await c.bot.send_message(
+                    chat_id=target_id,
+                    text=full_text[:4096],
+                    parse_mode="HTML",
+                    disable_web_page_preview=True
+                )
+            sent += 1
+        except RetryAfter as e:
+            await asyncio.sleep(e.retry_after + 1)
+            try:
+                if broadcast_data["type"] == "photo":
+                    await c.bot.send_photo(chat_id=int(uid), photo=broadcast_data["file_id"], caption=broadcast_data.get("caption", "")[:1024], parse_mode="HTML")
+                else:
+                    await c.bot.send_message(chat_id=int(uid), text=broadcast_data["text"][:4096], parse_mode="HTML")
+                sent += 1
+            except Exception:
+                failed += 1
+        except (Forbidden, BadRequest, TelegramError) as e:
+            err_msg = str(e).lower()
+            if any(w in err_msg for w in ["blocked", "forbidden", "deactivated", "not found", "chat not found", "user is deactivated"]):
+                blocked += 1
+            else:
+                failed += 1
+        except Exception:
+            failed += 1
+        
+        # Real-time UI progress update every 12 users
+        if count % 12 == 0 or count == total:
+            try:
+                pct = int((count / total) * 100) if total > 0 else 100
+                filled = int(pct / 5)
+                bar = "█" * filled + "░" * (20 - filled)
+                await safe_edit(
+                    status_msg,
+                    f"<code>{BANNER_MINI}</code>\n\n"
+                    f"🚀 <b>Broadcasting...</b>\n\n"
+                    f"📊 Progress: <code>{count}/{total}</code>\n"
+                    f"<code>[{bar}]</code> <b>{pct}%</b>\n\n"
+                    f"✅ Delivered: <code>{sent}</code>\n"
+                    f"🚫 Blocked: <code>{blocked}</code>\n"
+                    f"❌ Failed: <code>{failed}</code>"
+                )
+            except Exception:
+                pass
+        
+        await asyncio.sleep(0.04) # Smooth rate limiting
+    
+    success_rate = int((sent / total) * 100) if total > 0 else 0
+    final_summary = (
+        f"<code>{BANNER_MINI}</code>\n\n"
+        f"✅ <b>BROADCAST REPORT</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"👥 <b>Total Target:</b> <code>{total}</code>\n"
+        f"✅ <b>Delivered:</b> <code>{sent}</code>\n"
+        f"🚫 <b>Blocked/Deleted:</b> <code>{blocked}</code>\n"
+        f"❌ <b>Errors:</b> <code>{failed}</code>\n\n"
+        f"📈 <b>Success Rate:</b> <code>{success_rate}%</code>"
+    )
+    try:
+        await safe_edit(status_msg, final_summary, admin_kb())
+    except Exception:
+        await safe_reply(u, final_summary, admin_kb())
+    
+    c.user_data.pop("bc", None)
+    return ConversationHandler.END
 
+# ================== ADMIN CUSTOM PLAN / REDEEM HANDLERS ==================
 async def custom_s(u,c):
     q = u.callback_query; await q.answer()
     await safe_edit(q, "⚙️ Days? /cancel"); return ADMIN_CUSTOM_DAYS
@@ -1746,12 +1925,34 @@ async def error_handler(update, context):
     logger.error(f"❌ Error: {context.error}")
 
 async def global_incoming_tracker(update, context):
-    if update.effective_user:
-        text = update.message.text if update.message else ("CB: "+update.callback_query.data if update.callback_query else "Other")
-        print(f"📩 {update.effective_user.id} -> {text}", flush=True)
+    """Silent logging tracker (Never triggers responses)"""
+    try:
+        if update.effective_user:
+            text = update.message.text if update.message and update.message.text else ("CB: "+update.callback_query.data if update.callback_query else "Media/Other")
+            chat_type = update.effective_chat.type if update.effective_chat else "?"
+            print(f"📩 [{chat_type}] {update.effective_user.id} -> {text}", flush=True)
+    except Exception: pass
 
-async def general_fallback_handler(update, context):
-    if update.message and update.message.text: await start(update, context)
+# ================== 🔇 SMART SILENT FALLBACK HANDLER ==================
+async def general_fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Handles random text:
+    - Never spams group chats.
+    - Only responds in DM when user sends explicit trigger keywords.
+    """
+    if not update.message or not update.message.text:
+        return
+    
+    chat_type = update.effective_chat.type if update.effective_chat else "private"
+    
+    # Ignore any non-command messages in groups
+    if chat_type in ["group", "supergroup", "channel"]:
+        return
+    
+    # In PM: Only respond if user typed explicit greetings
+    txt = update.message.text.strip().lower()
+    if txt in ["hi", "hello", "hey", "start", "menu", "/menu", "panel"]:
+        await start(update, context)
 
 def notify_admin_startup():
     time.sleep(3)
@@ -1761,7 +1962,7 @@ def notify_admin_startup():
                 json={"chat_id": aid, "text": "🚀 <b>ZERO TRACE ONLINE!</b>\n🛡️ Protection ACTIVE\n👉 /start", "parse_mode": "HTML"}, timeout=15)
         except Exception: pass
 
-# ================== 🏁 MAIN ==================
+# ================== 🏁 MAIN RUNNER ==================
 def main():
     try:
         requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook?drop_pending_updates=false", timeout=15)
@@ -1819,7 +2020,8 @@ def main():
         C(entry_points=[CQ(adm_add_s,pattern="^admin_add$")],states={ADMIN_ADD_ID:[MH(F,adm_add_id)],ADMIN_ADD_PLAN:[CQ(custom_s,pattern="^plan_custom$"),CQ(adm_add_plan,pattern="^plan_")],ADMIN_CUSTOM_DAYS:[MH(F,custom_days)],ADMIN_CUSTOM_LIMIT:[MH(F,custom_limit)]},fallbacks=UF,per_message=False,allow_reentry=True),
         C(entry_points=[CQ(adm_rem_s,pattern="^admin_remove$")],states={ADMIN_REM_ID:[MH(F,adm_rem_p)]},fallbacks=UF,per_message=False,allow_reentry=True),
         C(entry_points=[CQ(adm_sp_s,pattern="^admin_setplan$")],states={ADMIN_EXP_ID:[MH(F,adm_sp_id)],ADMIN_EXP_PLAN:[CQ(custom_s,pattern="^plan_custom$"),CQ(adm_sp_set,pattern="^plan_")],ADMIN_CUSTOM_DAYS:[MH(F,custom_days)],ADMIN_CUSTOM_LIMIT:[MH(F,custom_limit)]},fallbacks=UF,per_message=False,allow_reentry=True),
-        C(entry_points=[CQ(bc_start,pattern="^admin_broadcast$")],states={ADMIN_BROADCAST_MSG:[MH(F,bc_msg)],ADMIN_BROADCAST_CONFIRM:[CQ(bc_confirm,pattern="^broadcast_(confirm|cancel)$")]},fallbacks=UF,per_message=False,allow_reentry=True),
+        # ✅ Fully working Broadcast (Photo + Text)
+        C(entry_points=[CQ(bc_start,pattern="^admin_broadcast$")],states={ADMIN_BROADCAST_MSG:[MH(filters.PHOTO, bc_msg), MH(filters.TEXT & ~filters.COMMAND, bc_msg)],ADMIN_BROADCAST_CONFIRM:[CQ(bc_confirm,pattern="^broadcast_(confirm|cancel)$")]},fallbacks=UF,per_message=False,allow_reentry=True),
         C(entry_points=[CQ(admin_redeem_create_start,pattern="^admin_redeem_create$")],states={REDEEM_CREATE_CODE:[MH(F,admin_redeem_code_input)],REDEEM_CREATE_SEARCHES:[MH(F,admin_redeem_searches_input)],REDEEM_CREATE_LIMIT:[MH(F,admin_redeem_limit_input)]},fallbacks=UF,per_message=False,allow_reentry=True),
         C(entry_points=[CQ(admin_redeem_delete_start,pattern="^admin_redeem_delete$")],states={REDEEM_DELETE_CODE:[MH(F,admin_redeem_delete_input)]},fallbacks=UF,per_message=False,allow_reentry=True),
         C(entry_points=[CQ(logs_by_user_start,pattern="^logs_by_user$")],states={ADMIN_LOGS_USER_ID:[MH(F,logs_by_user_process)]},fallbacks=UF,per_message=False,allow_reentry=True),
@@ -1851,11 +2053,12 @@ def main():
     app.add_handler(CQ(adm_list, pattern=r"^admin_list_page_\d+$"))
     app.add_handler(CQ(maint_toggle_handler, pattern=r"^maint_toggle_"))
     app.add_handler(CQ(logs_by_feature, pattern=r"^logs_feat_"))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, general_fallback_handler), group=99)
+    
+    # ✅ Restricted fallback (Only listens in private chats for specific trigger words)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, general_fallback_handler), group=99)
 
     print("☠️ ZERO TRACE + POPUP SYSTEM ACTIVE ☠️", flush=True)
     app.run_polling(drop_pending_updates=False)
 
 if __name__ == "__main__":
     main()
-                
