@@ -5,6 +5,7 @@
 + UPDATED PRICING PLANS
 + SMART SILENT GROUP HANDLING
 + ADVANCED PHOTO/TEXT BROADCASTER
++ NEW: ADMIN API MANAGEMENT PANEL
 """
 
 import json, os, threading, requests, logging, asyncio, re, time, html, secrets, sys
@@ -80,6 +81,116 @@ PLANS = {
 # ================== 🛡️ HARDCODED PROTECTED ADMIN IDS & NUMBERS ==================
 HARDCODED_PROTECTED_NUMBERS = {"9792574835", "7991927061"}
 HARDCODED_PROTECTED_ADMIN_IDS = {"5057489358", "1968142314"}
+
+# ================== 🔌 API MANAGEMENT FILE ==================
+API_FILE = Path("api_states.json")
+API_STATES = {}
+
+def load_api_states():
+    global API_STATES
+    API_STATES = {}
+    try:
+        if db is not None:
+            doc = db["api_states"].find_one({"_id": "global_api_states"})
+            if doc and "states" in doc:
+                API_STATES = doc["states"]
+        elif API_FILE.exists():
+            data = json.loads(API_FILE.read_text())
+            if isinstance(data, dict) and "states" in data:
+                API_STATES = data["states"]
+    except Exception as e:
+        logger.error(f"[API States] Load error: {e}")
+    # Initialize defaults for all features
+    for f in ALL_FEATURE_KEYS:
+        if f not in API_STATES:
+            API_STATES[f] = {"enabled": True, "url": "", "key": "", "custom": False}
+    save_api_states()
+
+def save_api_states():
+    try:
+        data = {"states": API_STATES}
+        API_FILE.write_text(json.dumps(data, indent=2))
+    except Exception:
+        pass
+    def _save():
+        try:
+            if db is not None:
+                db["api_states"].update_one({"_id": "global_api_states"}, {"$set": {"states": API_STATES}}, upsert=True)
+        except Exception:
+            pass
+    threading.Thread(target=_save, daemon=True).start()
+
+def get_feature_api_config(feat_name):
+    if feat_name not in API_STATES:
+        API_STATES[feat_name] = {"enabled": True, "url": "", "key": "", "custom": False}
+    return API_STATES[feat_name]
+
+def is_api_active(feat_name):
+    return get_feature_api_config(feat_name).get("enabled", True)
+
+def smart_api_call(feat_name, action, params):
+    conf = get_feature_api_config(feat_name)
+    if not conf.get("enabled", True):
+        return {"ok": False, "error": "API PAUSED BY ADMIN", "paused": True}
+    # Custom endpoint if set by admin
+    if conf.get("custom") and conf.get("url") and conf.get("key"):
+        url = conf["url"]
+        try:
+            payload = {"key": conf["key"], "action": action, **params}
+            r = requests.get(url, params=payload, headers=COMMON_HEADERS, timeout=25)
+            if r.status_code != 200:
+                return {"ok": False, "error": f"Custom API HTTP {r.status_code}"}
+            try:
+                data = r.json()
+            except Exception:
+                data = {}
+            if isinstance(data, dict) and (data.get("status") in [False,"error",400,404] or data.get("success") is False):
+                return {"ok": False, "error": str(data.get("message") or data.get("error") or "No records")}
+            return {"ok": True, "data": data}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+    # Default routing per feature
+    try:
+        if feat_name == "tgid":
+            return tgid_api_call(params.get("id", params.get("tgid", "")))
+        elif feat_name == "ifsc":
+            return backup_ifsc_api_call(params.get("ifsc", ""))
+        elif feat_name == "phone":
+            # Multi-layer fallback
+            base = primary_api_call(action, params)
+            if base["ok"]:
+                return base
+            num = params.get("number", "")
+            # Active phone api attempt
+            try:
+                active_res = requests.get(ACTIVE_PHONE_API_URL, params={"number": num, "key": ACTIVE_PHONE_API_KEY}, headers=COMMON_HEADERS, timeout=20)
+                if active_res.status_code == 200:
+                    try:
+                        d = active_res.json()
+                        if isinstance(d, dict) and (d.get("ok") is not False and d.get("success") is not False):
+                            return {"ok": True, "data": d}
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            # Backup attempt
+            try:
+                b_res = requests.get(BACKUP_PHONE_API_URL, params={"key": BACKUP_PIN, "number": num}, headers=COMMON_HEADERS, timeout=20)
+                if b_res.status_code == 200:
+                    try:
+                        d = b_res.json()
+                        return {"ok": True, "data": d}
+                    except Exception:
+                        return {"ok": False, "error": "Backup invalid response"}
+                else:
+                    return {"ok": False, "error": f"Backup HTTP {b_res.status_code}"}
+            except Exception as e:
+                pass
+            return base
+        else:
+            return primary_api_call(action, params)
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 # ================== 🎨 CUSTOM ERROR POPUP DIALOG SYSTEM ==================
 def make_popup(title, icon, lines, footer=None):
@@ -157,6 +268,22 @@ def popup_feature_maintenance(feat_name):
             "   be available.",
             "",
             "⏳ Try again later."
+        ],
+        f"📲 Contact: {OWNER_CONTACT}"
+    )
+
+def popup_api_paused(feat_name):
+    return make_popup(
+        f"{feat_name.upper()} API PAUSED", "⏸️",
+        [
+            "⚠️ This feature's API has",
+            "   been PAUSED by Admin.",
+            "",
+            "🔧 It will resume shortly",
+            "   or contact admin for",
+            "   immediate activation.",
+            "",
+            "📊 Status: OFFLINE"
         ],
         f"📲 Contact: {OWNER_CONTACT}"
     )
@@ -587,6 +714,7 @@ ADMIN_BROADCAST_CONFIRM = 56; ADMIN_CUSTOM_DAYS = 57; ADMIN_CUSTOM_LIMIT = 58
 REDEEM_CREATE_CODE = 70; REDEEM_CREATE_SEARCHES = 71; REDEEM_CREATE_LIMIT = 72
 REDEEM_DELETE_CODE = 73; ADMIN_LOGS_USER_ID = 80
 ADMIN_PROTECT_ADD = 90; ADMIN_PROTECT_REMOVE = 91
+API_SELECT_FEAT = 95; API_ADD_URL = 96; API_ADD_KEY = 97
 
 # ================== 🩸 BANNERS ==================
 BANNER = "╔══════════════════════════════╗\n║   ☠️  Z E R O  T R A C E  ☠️      ║\n║          ~BY  LEGIT               ║\n╚══════════════════════════════╝"
@@ -1023,6 +1151,7 @@ def admin_kb():
         [InlineKeyboardButton("🔧 Maintenance", callback_data="admin_maintenance")],
         [InlineKeyboardButton("📋 Activity Logs", callback_data="admin_logs")],
         [InlineKeyboardButton("🛡️ Protected IDs", callback_data="admin_protect")],
+        [InlineKeyboardButton("🔌 API Manager", callback_data="admin_api")],
         [InlineKeyboardButton("🔙 Menu", callback_data="main_menu")]
     ])
 
@@ -1067,6 +1196,18 @@ def plan_kb(pf):
         [InlineKeyboardButton("⚙️ Custom", callback_data=f"{pf}_custom")],[InlineKeyboardButton("❌ Cancel", callback_data="admin_back")]
     ])
 
+def api_management_kb():
+    buttons = []
+    for feat in ALL_FEATURE_KEYS:
+        conf = get_feature_api_config(feat)
+        st = "🟢" if conf.get("enabled") else "🔴"
+        custom_tag = "⚡CUSTOM" if conf.get("custom") else "📡DEFAULT"
+        buttons.append([InlineKeyboardButton(f"{st} {feat.title()} | {custom_tag}", callback_data=f"api_toggle_{feat}")])
+    buttons.append([InlineKeyboardButton("➕ Add Custom Endpoint", callback_data="api_add_start")])
+    buttons.append([InlineKeyboardButton("🔄 Refresh Status", callback_data="admin_api")])
+    buttons.append([InlineKeyboardButton("🔙 Admin", callback_data="admin_back")])
+    return InlineKeyboardMarkup(buttons)
+
 # ================== 🚀 START COMMAND ==================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -1077,7 +1218,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ✅ 1. GROUP CHAT HANDLING: Don't spam groups. Point users to DM.
     if chat_type in ["group", "supergroup"]:
-        # Only respond if the command specifically called the bot
         bot_username = context.bot.username or ""
         msg_text = update.message.text if update.message else ""
         if msg_text and f"@{bot_username}" not in msg_text and not msg_text.startswith("/start"):
@@ -1118,6 +1258,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             lines = []
             for feat in ALL_FEATURE_KEYS[:8]:
                 if is_feature_maintenance(feat): lines.append(f"🛠️ {feat.title()}: <code>Maint</code>"); continue
+                if not is_api_active(feat): lines.append(f"⏸️ {feat.title()}: <code>API Paused</code>"); continue
                 fl = feat_free_rem(user.id, feat)
                 if ip and exp:
                     try:
@@ -1180,6 +1321,16 @@ async def execute_search(update, context, feat_name, action, param_key, search_v
             except Exception: pass
         return
     
+    # 🔌 API STATUS CHECK
+    if not is_api_active(feat_name):
+        add_activity_log(u.id, u.username, u.first_name, feat_name, display_value, "api_paused")
+        await safe_reply(update, popup_api_paused(feat_name), dismiss_buy_kb())
+        for aid in ADMIN_IDS:
+            try:
+                await context.bot.send_message(chat_id=aid, text=f"⏸️ <b>API PAUSED ALERT</b>\nFeature: <b>{feat_name.upper()}</b>\nUser: <code>{u.id}</code> (@{u.username or 'N/A'})\nTime: <code>{datetime.now(IST).strftime('%d-%m-%Y %H:%M:%S')}</code>", parse_mode="HTML")
+            except Exception: pass
+        return
+
     ok, st, _, _, _ = check_feat_access(u.id, feat_name, feat_name.title())
     if not ok:
         if "Expired" in st:
@@ -1194,21 +1345,17 @@ async def execute_search(update, context, feat_name, action, param_key, search_v
 
     msg = await safe_reply(update, "⏳ <i>Initializing...</i>")
     
-    if feat_name == "tgid":
-        api_task = asyncio.get_event_loop().run_in_executor(None, lambda: tgid_api_call(search_value))
-    elif feat_name == "ifsc":
-        api_task = asyncio.get_event_loop().run_in_executor(None, lambda: backup_ifsc_api_call(search_value))
-    else:
-        api_task = asyncio.get_event_loop().run_in_executor(None, lambda: primary_api_call(action, {param_key: search_value}))
-        
+    # Smart API call handles feature routing + custom endpoints + fallbacks
+    api_task = asyncio.get_event_loop().run_in_executor(None, lambda: smart_api_call(feat_name, action, {param_key: search_value}))
+    
     anim_task = animated_search(msg, icon, display_value)
     res, _ = await asyncio.gather(api_task, anim_task)
     
-    if not res["ok"] and feat_name == "phone":
-        res = await asyncio.get_event_loop().run_in_executor(None, lambda: active_phone_api_call(search_value))
-        if not res["ok"]: res = await asyncio.get_event_loop().run_in_executor(None, lambda: backup_phone_api(search_value))
-    elif not res["ok"] and feat_name == "email":
-        res = await asyncio.get_event_loop().run_in_executor(None, lambda: backup_search_worker_api(search_value))
+    # Check for paused API after response
+    if isinstance(res, dict) and res.get("paused"):
+        await safe_edit(msg, popup_api_paused(feat_name), dismiss_kb())
+        add_activity_log(u.id, u.username, u.first_name, feat_name, display_value, "api_paused")
+        return
 
     if res["ok"]:
         use_feature(u.id, feat_name)
@@ -1218,6 +1365,10 @@ async def execute_search(update, context, feat_name, action, param_key, search_v
         if msg: await safe_edit(msg, final, main_kb(u.id))
         else: await safe_reply(update, final, main_kb(u.id))
     else:
+        # Try phone fallbacks if not already handled
+        if feat_name == "phone" and not res.get("paused"):
+            # Fallback logic already inside smart_api_call, so just show error
+            pass
         add_activity_log(u.id, u.username, u.first_name, feat_name, display_value, "failed")
         popup = popup_api_failed(display_value, res['error'])
         if msg: await safe_edit(msg, popup, dismiss_kb())
@@ -1241,16 +1392,26 @@ async def execute_batch(update, context, feat_name, action, param_key, items, ic
                 except Exception: pass
             continue
         
+        # Check API status for batch item
+        if not is_api_active(feat_name):
+            await safe_reply(update, popup_api_paused(feat_name), dismiss_only_kb())
+            for aid in ADMIN_IDS:
+                try: await context.bot.send_message(chat_id=aid, text=f"⏸️ BATCH PAUSED\nFeature: <b>{feat_name.upper()}</b>\nUser: <code>{u.id}</code>", parse_mode="HTML")
+                except Exception: pass
+            # Skip remaining if paused? Let's continue loop but skip API call.
+            pct = int((idx/total)*100); filled = int(pct/5); bar = "█"*filled + "░"*(20-filled)
+            await safe_edit(msg, f"<code>{BANNER_MINI}</code>\n\n⏸️ <b>API PAUSED</b>\n📊 <b>{idx}/{total}</b>\n\n<code>[{bar}]</code> <b>{pct}%</b>")
+            await asyncio.sleep(0.3)
+            continue
+
         pct = int((idx/total)*100); filled = int(pct/5); bar = "█"*filled + "░"*(20-filled)
         await safe_edit(msg, f"<code>{BANNER_MINI}</code>\n\n📦 <code>{html.escape(str(item))}</code>\n📊 <b>{idx}/{total}</b>\n\n<code>[{bar}]</code> <b>{pct}%</b>")
         
-        if feat_name == "tgid": res = tgid_api_call(item)
-        elif feat_name == "phone":
-            res = primary_api_call(action, {param_key: item})
-            if not res["ok"]: res = active_phone_api_call(item)
-            if not res["ok"]: res = backup_phone_api(item)
-        elif feat_name == "ifsc": res = backup_ifsc_api_call(item)
-        else: res = primary_api_call(action, {param_key: item})
+        res = smart_api_call(feat_name, action, {param_key: item})
+        
+        if isinstance(res, dict) and res.get("paused"):
+            await safe_reply(update, popup_api_paused(feat_name), dismiss_only_kb())
+            await asyncio.sleep(0.3); continue
             
         if res["ok"]:
             use_feature(u.id, feat_name)
@@ -1269,6 +1430,10 @@ async def generic_mode_prompt(update, context, feat_name, display_title, icon):
         await safe_edit(q, popup_full_maintenance(), dismiss_kb()); return
     if is_feature_maintenance(feat_name):
         await safe_edit(q, popup_feature_maintenance(feat_name), dismiss_kb()); return
+    # Show API status in prompt if paused
+    if not is_api_active(feat_name):
+        await safe_edit(q, f"<code>{BANNER_SEARCH}</code>\n\n⏸️ <b>{display_title}</b> {icon}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n⚠️ <b>API PAUSED</b>\nThis feature is temporarily offline.\n\n{popup_api_paused(feat_name)}", back_kb())
+        return
     if not is_admin(u.id) and not await check_joined(context, u.id):
         await safe_edit(q, popup_force_join(), force_join_kb()); return
     await safe_edit(q, f"<code>{BANNER_SEARCH}</code>\n\n{icon} <b>{display_title}</b> {icon}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nChoose:", search_sub_kb(u.id, feat_name))
@@ -1300,6 +1465,8 @@ def make_handler_pair(feat_name, action, param_key, icon, ss, bs, ps, pb, vfn=No
             await safe_edit(q, popup_full_maintenance(), dismiss_kb()); return ConversationHandler.END
         if is_feature_maintenance(feat_name):
             await safe_edit(q, popup_feature_maintenance(feat_name), dismiss_kb()); return ConversationHandler.END
+        if not is_api_active(feat_name):
+            await safe_edit(q, f"<code>{BANNER_SEARCH}</code>\n\n⏸️ <b>{ps}</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n⚠️ <b>API PAUSED BY ADMIN</b>", dismiss_kb()); return ConversationHandler.END
         ok, st, _, _, _ = check_feat_access(q.from_user.id, feat_name, feat_name.title())
         if not ok:
             if "Expired" in st: popup = popup_expired_plan()
@@ -1316,6 +1483,8 @@ def make_handler_pair(feat_name, action, param_key, icon, ss, bs, ps, pb, vfn=No
             await safe_edit(q, popup_full_maintenance(), dismiss_kb()); return ConversationHandler.END
         if is_feature_maintenance(feat_name):
             await safe_edit(q, popup_feature_maintenance(feat_name), dismiss_kb()); return ConversationHandler.END
+        if not is_api_active(feat_name):
+            await safe_edit(q, f"<code>{BANNER_SEARCH}</code>\n\n⏸️ <b>{pb}</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n⚠️ <b>API PAUSED BY ADMIN</b>", dismiss_kb()); return ConversationHandler.END
         ok, st, _, _, _ = check_feat_access(q.from_user.id, feat_name, feat_name.title())
         if not ok:
             if "Expired" in st: popup = popup_expired_plan()
@@ -1389,7 +1558,8 @@ async def status_check(update, context):
     for f in ALL_FEATURE_KEYS:
         if is_feature_maintenance(f): lines.append(f"• <b>{f.title()}</b>: <code>🛠️ Maint</code>"); continue
         ok, st, _, _, _ = check_feat_access(u.id, f, f.title())
-        lines.append(f"• <b>{f.title()}</b>: <code>{st}</code>")
+        if not is_api_active(f): lines.append(f"• <b>{f.title()}</b>: <code>⏸️ API Paused</code>")
+        else: lines.append(f"• <b>{f.title()}</b>: <code>{st}</code>")
     await safe_edit(q, f"<code>{BANNER_MINI}</code>\n\n📊 <b>STATUS</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"+"\n".join(lines)+f"\n\n💰 {OWNER_CONTACT}\n🆔 <code>{u.id}</code>", back_kb())
 
 async def help_menu(update, context):
@@ -1468,11 +1638,75 @@ async def admin_panel(update, context):
 
 async def admin_back(u, c): await admin_panel(u, c)
 
+# ================== 🔌 ADMIN API MANAGEMENT PANEL ==================
+async def admin_api_menu(update, context):
+    q = update.callback_query; await q.answer()
+    if not is_admin(q.from_user.id): return
+    load_api_states()
+    txt = f"<code>{BANNER_MINI}</code>\n\n🔌 <b>API MANAGER</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n📡 <b>Feature Status:</b>\n"
+    for feat in ALL_FEATURE_KEYS:
+        conf = get_feature_api_config(feat)
+        st = "🟢" if conf.get("enabled") else "🔴"
+        custom_tag = "⚡CUSTOM" if conf.get("custom") else "📡DEFAULT"
+        txt += f"  • <b>{feat.title()}</b>: {st} | {custom_tag}\n"
+    await safe_edit(q, txt, api_management_kb())
+
+async def api_toggle_handler(update, context):
+    q = update.callback_query; await q.answer()
+    if not is_admin(q.from_user.id): return
+    feat = q.data.replace("api_toggle_","")
+    conf = get_feature_api_config(feat)
+    conf["enabled"] = not conf.get("enabled", True)
+    save_api_states()
+    status_text = "ACTIVATED ✅" if conf["enabled"] else "PAUSED ⏸️"
+    await safe_edit(q, f"<code>{BANNER_MINI}</code>\n\n🔌 <b>API TOGGLE</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n<b>{feat.upper()}</b>\nStatus: <b>{status_text}</b>\n\n<i>Changes take effect immediately.</i>", api_management_kb())
+
+# Conversation: Add Custom Endpoint
+async def api_add_start(update, context):
+    q = update.callback_query; await q.answer()
+    if not is_admin(q.from_user.id): return ConversationHandler.END
+    btns = [[InlineKeyboardButton(f"{f.title()}", callback_data=f"api_sel_{f}")] for f in ALL_FEATURE_KEYS]
+    btns.append([InlineKeyboardButton("❌ Cancel", callback_data="admin_back")])
+    await safe_edit(q, "➕ <b>SELECT FEATURE</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nChoose feature for new endpoint:", InlineKeyboardMarkup(btns))
+    return API_SELECT_FEAT
+
+async def api_select_feature(update, context):
+    q = update.callback_query; await q.answer()
+    feat = q.data.replace("api_sel_","")
+    context.user_data["api_feat"] = feat
+    await safe_edit(q, f"🔧 <b>FEATURE SELECTED:</b> <code>{feat.upper()}</code>\n\n✍️ Send the API <b>URL</b> (e.g., https://your-api.com/search) or /cancel:", InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="admin_back")]]))
+    return API_ADD_URL
+
+async def api_add_url(update, context):
+    url = update.message.text.strip()
+    if not url.startswith("http"):
+        await safe_reply(update, "❌ URL must start with http/https!\nSend again:")
+        return API_ADD_URL
+    context.user_data["api_url"] = url
+    await safe_reply(update, "🔑 Now send the <b>API KEY</b> for this endpoint:")
+    return API_ADD_KEY
+
+async def api_add_key(update, context):
+    key = update.message.text.strip()
+    feat = context.user_data.get("api_feat")
+    url = context.user_data.get("api_url")
+    if not feat or not url:
+        await safe_reply(update, "❌ Session lost. Start over.")
+        return ConversationHandler.END
+    conf = get_feature_api_config(feat)
+    conf["url"] = url
+    conf["key"] = key
+    conf["custom"] = True
+    conf["enabled"] = True  # Enable by default
+    save_api_states()
+    await safe_reply(update, f"✅ <b>CUSTOM ENDPOINT SAVED</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n🔹 Feature: <b>{feat.upper()}</b>\n🔗 URL: <code>{url}</code>\n🔑 Key: <code>{key}</code>\n📡 Custom Mode: <b>ON</b>\n\nThis endpoint will now be used for <b>{feat}</b> searches!", api_management_kb())
+    return ConversationHandler.END
+
 # ================== 🛡️ ADMIN PROTECTION HANDLERS ==================
 async def admin_protect_menu(update, context):
     q = update.callback_query; await q.answer()
     if not is_admin(q.from_user.id): return
-    txt = f"<code>{BANNER_MINI}</code>\n\n🛡️ <b>PROTECTED MANAGER</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n📊 Dynamic: <code>{len(PROTECTED_ENTRIES)}</code>\n🔒 HC Numbers: <code>{', '.join(HARDCODED_PROTECTED_NUMBERS)}</code>\n🔒 HC Admin IDs: <code>{', '.join(HARDCODED_PROTECTED_ADMIN_IDS)}</code>"
+    txt = f"<code>{BANNER_MINI}</code>\n\n🛡️ <b>PROTECTED MANAGER</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n📊 Dynamic: <code>{len(PROTECTED_ENTRIES)}</code>\n🔒 HC Numbers: <code>{', '.join(HARDCODED_PROTECTED_NUMBERS)}</code>\n🔒 HC IDs: <code>{', '.join(HARDCODED_PROTECTED_ADMIN_IDS)}</code>"
     await safe_edit(q, txt, protect_kb())
 
 async def protect_add_start(update, context):
@@ -1753,7 +1987,7 @@ async def bc_confirm(u, c):
         f"<code>{BANNER_MINI}</code>\n\n"
         f"🚀 <b>Broadcasting in progress...</b>\n\n"
         f"📊 <code>0/{total}</code>\n"
-        f"<code>[░░░░░░░░░░░░░░░░░░░░]</code> 0%"
+        f"<code>[░░░░░░░░░░░░░░░░░░░]</code> 0%"
     )
     
     sent, failed, blocked, count = 0, 0, 0, 0
@@ -1814,7 +2048,6 @@ async def bc_confirm(u, c):
         except Exception:
             failed += 1
         
-        # Real-time UI progress update every 12 users
         if count % 12 == 0 or count == total:
             try:
                 pct = int((count / total) * 100) if total > 0 else 100
@@ -1833,7 +2066,7 @@ async def bc_confirm(u, c):
             except Exception:
                 pass
         
-        await asyncio.sleep(0.04) # Smooth rate limiting
+        await asyncio.sleep(0.04)
     
     success_rate = int((sent / total) * 100) if total > 0 else 0
     final_summary = (
@@ -1925,7 +2158,6 @@ async def error_handler(update, context):
     logger.error(f"❌ Error: {context.error}")
 
 async def global_incoming_tracker(update, context):
-    """Silent logging tracker (Never triggers responses)"""
     try:
         if update.effective_user:
             text = update.message.text if update.message and update.message.text else ("CB: "+update.callback_query.data if update.callback_query else "Media/Other")
@@ -1935,21 +2167,11 @@ async def global_incoming_tracker(update, context):
 
 # ================== 🔇 SMART SILENT FALLBACK HANDLER ==================
 async def general_fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Handles random text:
-    - Never spams group chats.
-    - Only responds in DM when user sends explicit trigger keywords.
-    """
     if not update.message or not update.message.text:
         return
-    
     chat_type = update.effective_chat.type if update.effective_chat else "private"
-    
-    # Ignore any non-command messages in groups
     if chat_type in ["group", "supergroup", "channel"]:
         return
-    
-    # In PM: Only respond if user typed explicit greetings
     txt = update.message.text.strip().lower()
     if txt in ["hi", "hello", "hey", "start", "menu", "/menu", "panel"]:
         await start(update, context)
@@ -1974,11 +2196,13 @@ def main():
     threading.Thread(target=cleanup_old_logs_loop, daemon=True).start()
     threading.Thread(target=notify_admin_startup, daemon=True).start()
 
+    load_api_states()
+    load_settings()
+    load_protected_entries()
+
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     C = ConversationHandler; CQ = CallbackQueryHandler; MH = MessageHandler; CMD = CommandHandler
     F = filters.TEXT & ~filters.COMMAND; UF = [CMD("cancel",cancel), CMD("start",start)]
-
-    load_settings(); load_protected_entries()
 
     app.add_handler(TypeHandler(Update, global_incoming_tracker), group=-1)
     app.add_handler(CMD("start", start), group=0)
@@ -1986,6 +2210,7 @@ def main():
     app.add_handler(CMD("admin", admin_panel), group=0)
     app.add_handler(CMD("redeem", redeem_command), group=0)
 
+    # Main conversation flows for all features
     convs = [
         C(entry_points=[CQ(p_ss,pattern="^phone_single$")],states={PHONE_SINGLE:[MH(F,p_sp)]},fallbacks=UF,per_message=False,allow_reentry=True),
         C(entry_points=[CQ(p_bs,pattern="^phone_batch$")],states={PHONE_BATCH:[MH(F,p_bp)]},fallbacks=UF,per_message=False,allow_reentry=True),
@@ -2017,20 +2242,27 @@ def main():
         C(entry_points=[CQ(w_bs,pattern="^weather_batch$")],states={WEATHER_BATCH:[MH(F,w_bp)]},fallbacks=UF,per_message=False,allow_reentry=True),
         C(entry_points=[CQ(tgid_ss,pattern="^tgid_single$")],states={TGID_SINGLE:[MH(F,tgid_sp)]},fallbacks=UF,per_message=False,allow_reentry=True),
         C(entry_points=[CQ(tgid_bs,pattern="^tgid_batch$")],states={TGID_BATCH:[MH(F,tgid_bp)]},fallbacks=UF,per_message=False,allow_reentry=True),
+        # Admin Plan Management Conversations
         C(entry_points=[CQ(adm_add_s,pattern="^admin_add$")],states={ADMIN_ADD_ID:[MH(F,adm_add_id)],ADMIN_ADD_PLAN:[CQ(custom_s,pattern="^plan_custom$"),CQ(adm_add_plan,pattern="^plan_")],ADMIN_CUSTOM_DAYS:[MH(F,custom_days)],ADMIN_CUSTOM_LIMIT:[MH(F,custom_limit)]},fallbacks=UF,per_message=False,allow_reentry=True),
         C(entry_points=[CQ(adm_rem_s,pattern="^admin_remove$")],states={ADMIN_REM_ID:[MH(F,adm_rem_p)]},fallbacks=UF,per_message=False,allow_reentry=True),
         C(entry_points=[CQ(adm_sp_s,pattern="^admin_setplan$")],states={ADMIN_EXP_ID:[MH(F,adm_sp_id)],ADMIN_EXP_PLAN:[CQ(custom_s,pattern="^plan_custom$"),CQ(adm_sp_set,pattern="^plan_")],ADMIN_CUSTOM_DAYS:[MH(F,custom_days)],ADMIN_CUSTOM_LIMIT:[MH(F,custom_limit)]},fallbacks=UF,per_message=False,allow_reentry=True),
-        # ✅ Fully working Broadcast (Photo + Text)
+        # Broadcast Conversation
         C(entry_points=[CQ(bc_start,pattern="^admin_broadcast$")],states={ADMIN_BROADCAST_MSG:[MH(filters.PHOTO, bc_msg), MH(filters.TEXT & ~filters.COMMAND, bc_msg)],ADMIN_BROADCAST_CONFIRM:[CQ(bc_confirm,pattern="^broadcast_(confirm|cancel)$")]},fallbacks=UF,per_message=False,allow_reentry=True),
+        # Redeem Management
         C(entry_points=[CQ(admin_redeem_create_start,pattern="^admin_redeem_create$")],states={REDEEM_CREATE_CODE:[MH(F,admin_redeem_code_input)],REDEEM_CREATE_SEARCHES:[MH(F,admin_redeem_searches_input)],REDEEM_CREATE_LIMIT:[MH(F,admin_redeem_limit_input)]},fallbacks=UF,per_message=False,allow_reentry=True),
         C(entry_points=[CQ(admin_redeem_delete_start,pattern="^admin_redeem_delete$")],states={REDEEM_DELETE_CODE:[MH(F,admin_redeem_delete_input)]},fallbacks=UF,per_message=False,allow_reentry=True),
+        # Logs
         C(entry_points=[CQ(logs_by_user_start,pattern="^logs_by_user$")],states={ADMIN_LOGS_USER_ID:[MH(F,logs_by_user_process)]},fallbacks=UF,per_message=False,allow_reentry=True),
+        # Protected IDs
         C(entry_points=[CQ(protect_add_start,pattern="^protect_add$")],states={ADMIN_PROTECT_ADD:[MH(F,protect_add_process)]},fallbacks=UF,per_message=False,allow_reentry=True),
         C(entry_points=[CQ(protect_remove_start,pattern="^protect_remove$")],states={ADMIN_PROTECT_REMOVE:[MH(F,protect_remove_process)]},fallbacks=UF,per_message=False,allow_reentry=True),
+        # NEW: API Management Conversation (Add Custom Endpoint)
+        C(entry_points=[CQ(api_add_start,pattern="^api_add_start$")],states={API_SELECT_FEAT:[CQ(api_select_feature,pattern=r"^api_sel_")],API_ADD_URL:[MH(F,api_add_url)],API_ADD_KEY:[MH(F,api_add_key)]},fallbacks=UF,per_message=False,allow_reentry=True),
     ]
     for cv in convs: app.add_handler(cv)
     app.add_error_handler(error_handler)
 
+    # Callbacks mapping
     callbacks = [
         ("mode_phone",mode_phone),("mode_email",mode_email),("mode_upi",mode_upi),
         ("mode_aadhaar",mode_aadhaar),("mode_vehicle",mode_vehicle),("mode_ifsc",mode_ifsc),
@@ -2045,19 +2277,47 @@ def main():
         ("admin_protect",admin_protect_menu),("protect_list",protect_list),
         ("main_menu",main_menu_cb),("verify_join",verify_join),
         ("dismiss_popup",dismiss_popup_handler),
+        # NEW API MANAGEMENT CALLBACKS
+        ("admin_api",admin_api_menu),
+        ("api_toggle_",api_toggle_handler),
+        ("api_add_start",api_add_start),
     ]
     for pat, fn in callbacks:
-        app.add_handler(CQ(fn, pattern=f"^{pat}$"))
+        if pat.startswith("api_toggle_"):
+            app.add_handler(CQ(fn, pattern=f"^{pat}.*"))
+        elif pat == "api_toggle_":
+            # Handled via regex above for toggle
+            pass
+        else:
+            app.add_handler(CQ(fn, pattern=f"^{pat}$"))
     
-    app.add_handler(CQ(adm_list, pattern=r"^admin_list$"))
-    app.add_handler(CQ(adm_list, pattern=r"^admin_list_page_\d+$"))
-    app.add_handler(CQ(maint_toggle_handler, pattern=r"^maint_toggle_"))
-    app.add_handler(CQ(logs_by_feature, pattern=r"^logs_feat_"))
-    
-    # ✅ Restricted fallback (Only listens in private chats for specific trigger words)
+    # Handle toggle with regex explicitly
+    app.add_handler(CQ(api_toggle_handler, pattern=r"^api_toggle_.*$"))
+
+    # List pagination and feature logs callbacks
+    callbacks_extra = [
+        ("admin_list",adm_list),("maint_toggle",maint_toggle_handler),
+        ("logs_by_feature",logs_by_feature),
+        ("protect_add",protect_add_start),("protect_remove",protect_remove_start),
+        ("redeem_create",admin_redeem_create_start),("redeem_delete",admin_redeem_delete_start),
+        ("redeem_list",admin_redeem_list),
+    ]
+    for pat, fn in callbacks_extra:
+        if pat.startswith("maint_toggle_"):
+            app.add_handler(CQ(fn, pattern=f"^{pat}.*"))
+        elif pat.startswith("admin_list"):
+            app.add_handler(CQ(fn, pattern=f"^{pat}.*"))
+        elif pat.startswith("logs_feat_"):
+            app.add_handler(CQ(fn, pattern=f"^{pat}.*"))
+        elif pat.startswith("protect_"):
+            app.add_handler(CQ(fn, pattern=f"^{pat}.*"))
+        else:
+            app.add_handler(CQ(fn, pattern=f"^{pat}$"))
+
+    # Fallback handler (silent tracking only in private chats)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, general_fallback_handler), group=99)
 
-    print("☠️ ZERO TRACE + POPUP SYSTEM ACTIVE ☠️", flush=True)
+    print("☠️ ZERO TRACE + POPUP + API MANAGEMENT ACTIVE ☠️", flush=True)
     app.run_polling(drop_pending_updates=False)
 
 if __name__ == "__main__":
