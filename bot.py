@@ -7,6 +7,7 @@
 + ADVANCED PHOTO/TEXT BROADCASTER
 + ADVANCED MULTI-API POOL MANAGER (Pause/Resume/Auto-Pause Old)
 + HARDCODED & DYNAMIC RESULT FILTER (TEXT HIDER)
++ PAGINATED ADMIN USER LIST
 """
 
 import json, os, threading, requests, logging, asyncio, re, time, html, secrets, sys
@@ -516,6 +517,69 @@ def toggle_feature_maintenance(fn):
         SETTINGS_CACHE["feature_maintenance"][fn] = not SETTINGS_CACHE["feature_maintenance"][fn]; save_settings()
         return SETTINGS_CACHE["feature_maintenance"][fn]
     return False
+
+# ================== 👑 PLANS ==================
+def get_plan(ud):
+    pk = ud.get("plan", "trial")
+    if pk.startswith("custom_"):
+        try: d = int(pk.split("_")[1].replace("d",""))
+        except Exception: d = 30
+        return {"name": f"Custom ({d}D)", "days": d, "daily_limit": ud.get("custom_limit",0), "unlimited": ud.get("custom_unlimited",False), "is_free": False}
+    return PLANS.get(pk, PLANS["trial"])
+
+def upgrade(uid, pk):
+    uid = str(uid); ud = get_user(uid); plan = PLANS.get(pk, PLANS["7days"])
+    exp = (date.today() + timedelta(days=plan["days"])).isoformat()
+    ud.update({"plan": pk, "expiry": exp, "is_premium": True})
+    for f in ALL_FEATURE_KEYS: ud[f"{f}_daily"] = 0; ud[f"{f}_date"] = ""
+    save_user(uid, ud); return exp
+
+def upgrade_custom(uid, days, lim, unl):
+    uid = str(uid); ud = get_user(uid); exp = (date.today() + timedelta(days=days)).isoformat()
+    ud.update({"plan": f"custom_{days}d", "expiry": exp, "is_premium": True, "custom_limit": lim, "custom_unlimited": unl})
+    for f in ALL_FEATURE_KEYS: ud[f"{f}_daily"] = 0; ud[f"{f}_date"] = ""
+    save_user(uid, ud); return exp
+
+def check_feat_access(uid, feat_name, display_title):
+    if is_admin(uid): return True, "Admin ∞", 9999, True, "12months"
+    ud = get_user(uid); plan = get_plan(ud); pk = ud.get("plan","trial"); exp_s = ud.get("expiry",""); is_p = ud.get("is_premium",False)
+    fk = f"{feat_name}_free_used"; dk = f"{feat_name}_daily"; dtk = f"{feat_name}_date"
+    if is_p and exp_s:
+        try:
+            exp = date.fromisoformat(exp_s)
+            if date.today() > exp:
+                fl = max(0, FREE_LIMIT - ud.get(fk,0))
+                return (True, f"Expired|{fl}", 0, False, "trial") if fl > 0 else (False, "Expired!", 0, False, "trial")
+            dl = (exp - date.today()).days; lim = plan.get("daily_limit",0)
+            if plan.get("unlimited"): return True, f"{plan['name']}|∞|{dl}d", dl, True, pk
+            dr = lim if ud.get(dtk,"") != date.today().isoformat() else max(0, lim - ud.get(dk,0))
+            if dr <= 0: return False, f"Limit!({lim}/day)", dl, True, pk
+            return True, f"{plan['name']}|{dr}/{lim}|{dl}d", dl, True, pk
+        except Exception: pass
+    fl = max(0, FREE_LIMIT - ud.get(fk,0))
+    return (True, f"Free({fl}/{FREE_LIMIT})", 0, False, "trial") if fl > 0 else (False, "Trial over!", 0, False, "trial")
+
+def feat_free_rem(uid, fn):
+    if is_admin(uid): return 999999
+    return max(0, FREE_LIMIT - get_user(uid).get(f"{fn}_free_used",0))
+
+def feat_daily_rem(uid, fn):
+    if is_admin(uid): return 999999
+    ud = get_user(uid); plan = get_plan(ud)
+    if plan.get("unlimited"): return 999999
+    lim = plan.get("daily_limit",0)
+    if ud.get(f"{fn}_date","") != date.today().isoformat(): return lim
+    return max(0, lim - ud.get(f"{fn}_daily",0))
+
+def use_feature(uid, feat_name):
+    uid = str(uid); ud = get_user(uid); today = date.today().isoformat()
+    dk = f"{feat_name}_daily"; dtk = f"{feat_name}_date"; fk = f"{feat_name}_free_used"; tk = f"{feat_name}_total"
+    if ud.get(dtk,"") != today: ud[dk] = 0; ud[dtk] = today
+    plan = get_plan(ud)
+    if not is_admin(int(uid)):
+        if plan.get("is_free", True): ud[fk] = ud.get(fk,0) + 1
+        else: ud[dk] = ud.get(dk,0) + 1
+    ud[tk] = ud.get(tk,0) + 1; ud["total_searches"] = ud.get("total_searches",0) + 1; save_user(uid, ud)
 
 # ================== 🔢 CONVERSATION STATES ==================
 PHONE_SINGLE, PHONE_BATCH = 10, 11; EMAIL_SINGLE, EMAIL_BATCH = 12, 13
@@ -1508,14 +1572,74 @@ async def adm_rem_p(u,c):
     uid = u.message.text.strip(); delete_user(uid)
     await safe_reply(u, f"✅ <code>{uid}</code> reset!", admin_kb()); return ConversationHandler.END
 
-async def adm_list(u, c):
-    q = u.callback_query; await q.answer()
-    if not is_admin(q.from_user.id): return
-    users = load_users(); t = len(users)
-    txt = f"<code>{BANNER_MINI}</code>\n\n👥 <b>Total Users ({t}):</b>\n\n"
-    for k, v in list(users.items())[:30]:
-        txt += f"• <code>{k}</code> | {v.get('plan','trial')} | 🔍 {v.get('total_searches',0)}\n"
-    await safe_edit(q, txt[:4000], admin_kb())
+# PAGINATED ADMIN USER LISTS
+async def send_user_list_page(update, context, page_num):
+    q = update.callback_query
+    if q:
+        await q.answer()
+        uid = q.from_user.id
+    else:
+        uid = update.effective_user.id
+
+    if not is_admin(uid):
+        return
+
+    users = load_users()
+    user_keys = list(users.keys())
+    total_users = len(user_keys)
+    page_size = 15
+    total_pages = (total_users + page_size - 1) // page_size if total_users > 0 else 1
+
+    # Clamp the page number
+    if page_num < 0: page_num = 0
+    if page_num >= total_pages: page_num = total_pages - 1
+
+    start_idx = page_num * page_size
+    end_idx = start_idx + page_size
+    page_keys = user_keys[start_idx:end_idx]
+
+    txt = f"<code>{BANNER_MINI}</code>\n\n👥 <b>Total Users ({total_users}):</b>\n"
+    txt += f"📖 <b>Page:</b> <code>{page_num + 1}/{total_pages}</code>\n"
+    txt += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+
+    if not page_keys:
+        txt += "<i>No users found.</i>"
+    else:
+        for idx, k in enumerate(page_keys, start=start_idx + 1):
+            v = users[k]
+            plan_info = v.get('plan', 'trial')
+            searches = v.get('total_searches', 0)
+            txt += f"{idx}. <code>{k}</code> | {plan_info} | 🔍 {searches}\n"
+
+    # Create Dynamic Navigation Buttons
+    nav_buttons = []
+    if page_num > 0:
+        nav_buttons.append(InlineKeyboardButton("⏪ Prev", callback_data=f"adm_list_page_{page_num - 1}"))
+    if end_idx < total_users:
+        nav_buttons.append(InlineKeyboardButton("Next ⏩", callback_data=f"adm_list_page_{page_num + 1}"))
+
+    kb_rows = []
+    if nav_buttons:
+        kb_rows.append(nav_buttons)
+    kb_rows.append([InlineKeyboardButton("🔙 Admin Console", callback_data="admin_back")])
+
+    reply_markup = InlineKeyboardMarkup(kb_rows)
+
+    if q:
+        await safe_edit(q, txt, reply_markup)
+    else:
+        await safe_reply(update, txt, reply_markup)
+
+async def adm_list(update, context):
+    await send_user_list_page(update, context, 0)
+
+async def adm_list_page_handler(update, context):
+    q = update.callback_query
+    try:
+        page_num = int(q.data.split("_")[-1])
+    except Exception:
+        page_num = 0
+    await send_user_list_page(update, context, page_num)
 
 async def adm_stats(u, c):
     q = u.callback_query; await q.answer()
@@ -1683,6 +1807,7 @@ def main():
     app.add_handler(CQ(admin_feature_pool_view, pattern=r"^apipool_feat_.*$"))
     app.add_handler(CQ(admin_apipool_toggle, pattern=r"^apipool_toggle_.*$"))
     app.add_handler(CQ(maint_toggle_handler, pattern=r"^maint_toggle_.*$"))
+    app.add_handler(CQ(adm_list_page_handler, pattern=r"^adm_list_page_.*$"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, general_fallback_handler), group=99)
 
     print("☠️ ZERO TRACE + MULTI-API POOLS + RESULT FILTER ACTIVE ☠️", flush=True)
